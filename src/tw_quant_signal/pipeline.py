@@ -5,7 +5,7 @@ from tw_quant_signal.db import SignalDB
 from tw_quant_signal.twse_client import WATCH_STOCKS
 from tw_quant_signal.ingestion import IngestionEngine
 from tw_quant_signal.rules import compute_rule_signals, store_rule_signals, _aggregate_rules
-from tw_quant_signal.alerter import send_alert, send_rules_report, build_daily_report
+from tw_quant_signal.alerter import send_alert, send_rules_report, send_health_check_report, build_daily_report
 from tw_quant_signal.reporter import generate_markdown_report, generate_csv_report
 from tw_quant_signal.health_check import compute_health_check
 
@@ -71,6 +71,7 @@ def main():
         health_scores = compute_health_check(db, run_date)
         if health_scores:
             db.upsert_health_scores(health_scores)
+            send_health_check_report(health_scores)
             print(f"  → {len(health_scores)} 筆四燈號健診評分")
             status["health_check"] = "ok"
         else:

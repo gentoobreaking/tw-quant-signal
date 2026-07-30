@@ -205,3 +205,29 @@ def build_rules_report(rule_results: list[dict]) -> str:
 def send_rules_report(rule_results: list[dict]) -> bool:
     report = build_rules_report(rule_results)
     return send_alert(report)
+
+
+def build_health_check_report(health_scores: list[dict]) -> str:
+    run_date = date.today()
+    lines = [f"🩺 *四燈號健診 — {run_date.month:02d}/{run_date.day:02d}*", ""]
+    ASPECT = {
+        "fundamental": ("📈基本面", 25),
+        "institutional": ("👁籌碼面", 25),
+        "technical": ("📊技術面", 25),
+        "valuation": ("💰估值面", 25),
+    }
+    for row in health_scores:
+        sid = row["stock_id"]
+        name = STOCK_NAMES.get(sid, sid)
+        lines.append(f"{row['total_light']} *{sid} {name}*　{row['total_score']:.0f}/100")
+        for key, (label, _) in ASPECT.items():
+            s = row.get(f"{key}_score", 0) or 0
+            l = row.get(f"{key}_light", "⚪")
+            lines.append(f"  {l} {label} {s:.0f}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def send_health_check_report(health_scores: list[dict]) -> bool:
+    report = build_health_check_report(health_scores)
+    return send_alert(report)
