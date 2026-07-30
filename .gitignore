@@ -12,3 +12,4 @@ data/signal.db
 data/signal.db-wal
 data/signal.db-shm
 data/reports/
+*.swp
