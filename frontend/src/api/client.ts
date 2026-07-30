@@ -1,4 +1,4 @@
-import type { Stock, StockDetail, MarketState, HealthScore, Rule } from '../types'
+import type { Stock, StockDetail, MarketState, HealthScore, Rule, MultiTimeframeConsensus } from '../types'
 
 const BASE = '/api'
 
@@ -18,6 +18,8 @@ export const api = {
   marketState: () => request<MarketState>('/market-state'),
   dashboard: () => request<{ stocks: Stock[]; market_state: MarketState | null; report: string }>('/dashboard'),
   healthScores: () => request<HealthScore[]>('/health'),
+  weeklyHealth: () => request<HealthScore[]>('/weekly-health'),
+  multiTimeframe: () => request<MultiTimeframeConsensus[]>('/multi-timeframe'),
   healthCheckConfig: () => request<Record<string, any>>('/health-check-config'),
   updateHealthCheckConfig: (body: Record<string, any>) => request('/health-check-config', { method: 'PUT', body: JSON.stringify(body) }),
   rules: () => request<Rule[]>('/rules'),

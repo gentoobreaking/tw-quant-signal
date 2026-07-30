@@ -54,9 +54,59 @@ function StockDetailView({ stockId }: { stockId: string }) {
 
       {/* Health + Risk */}
       <div className="grid-2">
-        <HealthCheckCard health={data.health} />
+        <HealthCheckCard health={data.health} weeklyHealth={data.weekly_health} />
         <RiskCard risk={data.risk} />
       </div>
+
+      {/* Multi-timeframe consensus */}
+      {data.multi_timeframe && (
+        <div className="card">
+          <div className="flex-between">
+            <h2>🔗 多時間框架共識</h2>
+            {(() => {
+              const m = data.multi_timeframe
+              const consensusColors: Record<string, string> = {
+                strong_bullish: 'var(--green)',
+                mild_bullish: 'var(--green)',
+                neutral: 'var(--yellow)',
+                mild_bearish: 'var(--red)',
+                strong_bearish: 'var(--red)',
+                conflicting: 'var(--yellow)',
+              }
+              const typeLabels: Record<string, string> = {
+                short: '短線訊號 (1-5日)',
+                swing: '波段訊號 (1-4週)',
+                both: '短線+波段共振',
+                neutral: '無明確方向',
+              }
+              return (
+                <div style={{ textAlign: 'right', fontSize: 13 }}>
+                  <div style={{ fontWeight: 700, color: consensusColors[m.consensus] || 'var(--text-dim)', fontSize: 15 }}>
+                    {m.consensus_label}
+                  </div>
+                  <div className="text-dim" style={{ fontSize: 11 }}>{typeLabels[m.signal_type] || '中立'}</div>
+                </div>
+              )
+            })()}
+          </div>
+          <div className="grid-2 mt-8">
+            <div className="stat">
+              <div className="label">日線燈號</div>
+              <div className="value">{data.multi_timeframe.daily_light || '-'}</div>
+              <div className="text-dim" style={{ fontSize: 11 }}>
+                {data.multi_timeframe.details?.daily_score != null ? `${(data.multi_timeframe.details.daily_score as number).toFixed(0)}分` : '-'}
+              </div>
+            </div>
+            <div className="stat">
+              <div className="label">週線燈號</div>
+              <div className="value">{data.multi_timeframe.weekly_light || '-'}</div>
+              <div className="text-dim" style={{ fontSize: 11 }}>
+                {data.multi_timeframe.details?.weekly_score != null ? `${(data.multi_timeframe.details.weekly_score as number).toFixed(0)}分` : '-'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Chart */}
       <div className="card">

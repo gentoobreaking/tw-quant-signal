@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 
 from tw_quant_signal.db import SignalDB
 from tw_quant_signal.config import settings
+from tw_quant_signal.multi_timeframe import compute_multi_timeframe
 
 app = FastAPI(title="tw-quant-signal API", version="1.0.0")
 
@@ -129,9 +130,11 @@ def stock_detail(stock_id: str):
         ).fetchall()
 
     health = db.get_health_scores(today, stock_id)
+    weekly_health = db.get_weekly_health_scores(today, stock_id)
     risk = db.get_risk_metrics(today, stock_id)
     signals = db.get_rule_signals_for_date(today, stock_id)
     ms = _get_market_state(db, today)
+    tf_consensus = db.get_multi_timeframe_consensus(today, stock_id)
 
     return {
         "data": {
@@ -158,9 +161,11 @@ def stock_detail(stock_id: str):
                 for r in fin
             ],
             "health": health[0] if health else None,
+            "weekly_health": weekly_health[0] if weekly_health else None,
             "risk": risk[0] if risk else None,
             "signals": signals,
             "market_state": ms,
+            "multi_timeframe": tf_consensus[0] if tf_consensus else None,
         }
     }
 
@@ -268,6 +273,22 @@ def health_check_all():
     db = _get_db()
     today = date.today().isoformat()
     rows = db.get_health_scores(today)
+    return {"data": rows}
+
+
+@app.get("/api/weekly-health")
+def weekly_health():
+    db = _get_db()
+    today = date.today().isoformat()
+    rows = db.get_weekly_health_scores(today)
+    return {"data": rows}
+
+
+@app.get("/api/multi-timeframe")
+def multi_timeframe():
+    db = _get_db()
+    today = date.today().isoformat()
+    rows = db.get_multi_timeframe_consensus(today)
     return {"data": rows}
 
 

@@ -92,9 +92,22 @@ export interface StockDetail {
   features: Record<string, unknown> | null
   financials: FinancialQuarter[]
   health: HealthScore | null
+  weekly_health: HealthScore | null
   risk: RiskMetric | null
   signals: Array<{ triggered_rules: string }>
   market_state: MarketState | null
+  multi_timeframe: MultiTimeframeConsensus | null
+}
+
+export interface MultiTimeframeConsensus {
+  stock_id: string
+  trade_date: string
+  daily_light: string | null
+  weekly_light: string | null
+  consensus: string
+  consensus_label: string
+  signal_type: string
+  details: Record<string, unknown> | null
 }
 
 export interface Rule {

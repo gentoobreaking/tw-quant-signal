@@ -7,9 +7,11 @@ from tw_quant_signal.ingestion import IngestionEngine
 from tw_quant_signal.rules import compute_rule_signals, store_rule_signals, _aggregate_rules
 from tw_quant_signal.alerter import send_alert, send_rules_report, send_health_check_report, send_risk_report, build_daily_report
 from tw_quant_signal.reporter import generate_markdown_report, generate_csv_report
-from tw_quant_signal.health_check import compute_health_check
+from tw_quant_signal.health_check import compute_health_check, compute_health_check_weekly
 from tw_quant_signal.market_state import detect_market_state, LABELS as STATE_LABELS
 from tw_quant_signal.risk_manager import compute_risk_metrics, RISK_LEVELS
+from tw_quant_signal.indicators import compute_weekly_indicators, compute_monthly_indicators
+from tw_quant_signal.multi_timeframe import compute_multi_timeframe
 
 
 def _gather_report_data(db):
@@ -95,6 +97,49 @@ def main():
     except Exception as e:
         print(f"  ✗ 健診評分失敗: {e}")
         status["health_check"] = "fail"
+
+    # Weekly indicators
+    try:
+        for sid in WATCH_STOCKS:
+            prices = db.get_stock_prices(sid, limit=1500)
+            if prices:
+                daily_prices = [dict(p) for p in prices]
+                daily_prices.sort(key=lambda p: p["trade_date"])
+                weekly_ind = compute_weekly_indicators(daily_prices, sid)
+                if weekly_ind:
+                    db.upsert_weekly_indicators(weekly_ind)
+        print(f"  → 週線指標更新 (共 {len(WATCH_STOCKS)} 檔)")
+        status["weekly_indicators"] = "ok"
+    except Exception as e:
+        print(f"  ✗ 週線指標失敗: {e}")
+        status["weekly_indicators"] = "fail"
+
+    # Weekly health check
+    try:
+        weekly_health = compute_health_check_weekly(db, run_date)
+        if weekly_health:
+            db.upsert_weekly_health_scores(weekly_health)
+            print(f"  → {len(weekly_health)} 筆週線健診評分")
+            status["weekly_health"] = "ok"
+        else:
+            status["weekly_health"] = "skip"
+    except Exception as e:
+        print(f"  ✗ 週線健診失敗: {e}")
+        status["weekly_health"] = "fail"
+
+    # Multi-timeframe consensus
+    try:
+        consensus = compute_multi_timeframe(db, run_date)
+        if consensus:
+            db.upsert_multi_timeframe_consensus(consensus)
+            for c in consensus:
+                print(f"  → {c['stock_id']} 多時間框架: {c['consensus_label']} (日線 {c['daily_light']} + 週線 {c['weekly_light']})")
+            status["multi_timeframe"] = "ok"
+        else:
+            status["multi_timeframe"] = "skip"
+    except Exception as e:
+        print(f"  ✗ 多時間框架失敗: {e}")
+        status["multi_timeframe"] = "fail"
 
     # Risk metrics
     risk_metrics = None

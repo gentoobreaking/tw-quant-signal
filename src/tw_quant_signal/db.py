@@ -201,6 +201,22 @@ def _init_schema(conn: sqlite3.Connection):
             details          TEXT,
             PRIMARY KEY (trade_date, stock_id)
         );
+
+        CREATE TABLE IF NOT EXISTS monthly_indicators (
+            stock_id       TEXT NOT NULL,
+            trade_date     TEXT NOT NULL,
+            close          REAL,
+            ma3            REAL,
+            ma6            REAL,
+            ma12           REAL,
+            bb_upper       REAL,
+            bb_middle      REAL,
+            bb_lower       REAL,
+            rsi9           REAL,
+            volume_ma3     REAL,
+            volume_ma6     REAL,
+            PRIMARY KEY (stock_id, trade_date)
+        );
     """)
 
 
@@ -568,6 +584,32 @@ class SignalDB:
                 d["details"] = json.loads(d["details"])
             result.append(d)
         return result
+
+    def upsert_monthly_indicators(self, rows: list[dict]):
+        with self.connect() as conn:
+            for r in rows:
+                conn.execute(
+                    """INSERT OR REPLACE INTO monthly_indicators
+                       (stock_id, trade_date, close, ma3, ma6, ma12, bb_upper, bb_middle, bb_lower, rsi9, volume_ma3, volume_ma6)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [r["stock_id"], r["trade_date"], r.get("close"),
+                     r.get("ma3"), r.get("ma6"), r.get("ma12"),
+                     r.get("bb_upper"), r.get("bb_middle"),
+                     r.get("bb_lower"), r.get("rsi9"),
+                     r.get("volume_ma3"), r.get("volume_ma6")],
+                )
+
+    def get_monthly_indicators(self, stock_id: str) -> Optional[dict]:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT close, ma3, ma6, ma12, bb_upper, bb_middle, bb_lower, rsi9, volume_ma3, volume_ma6 "
+                "FROM monthly_indicators WHERE stock_id=? ORDER BY trade_date DESC LIMIT 1",
+                [stock_id],
+            ).fetchone()
+            if not row:
+                return None
+            keys = ["close", "ma3", "ma6", "ma12", "bb_upper", "bb_middle", "bb_lower", "rsi9", "volume_ma3", "volume_ma6"]
+            return dict(zip(keys, row))
 
     def upsert_multi_timeframe_consensus(self, rows: list[dict]):
         import json

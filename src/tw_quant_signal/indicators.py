@@ -132,6 +132,56 @@ def bb_position(close: float, bb_upper: float, bb_lower: float, bb_middle: float
         return "below_mid"
 
 
+def compute_monthly_indicators(prices: list[dict], stock_id: str = "2330") -> list[dict]:
+    """Aggregate daily prices to monthly and compute monthly indicators.
+
+    Uses last trading day of each month. Windows: MA3 (3 months), MA6 (6 months), MA12 (12 months),
+    BB(6 months), RSI(9 months). This provides the mid-term (1-3 month) extension point.
+    """
+    if not prices:
+        return []
+    df = pd.DataFrame(prices)
+    df = df.sort_values("trade_date").reset_index(drop=True)
+    df["trade_date"] = pd.to_datetime(df["trade_date"])
+
+    df["month"] = df["trade_date"].dt.to_period("M").astype(str)
+
+    monthly = df.groupby("month").agg({
+        "close": "last",
+        "high": "max",
+        "low": "min",
+        "volume": "sum",
+        "trade_date": "last",
+    }).reset_index(drop=True)
+    monthly = monthly.sort_values("trade_date").reset_index(drop=True)
+
+    close = monthly["close"].astype(float)
+    volume = monthly["volume"].astype(float)
+
+    monthly["ma3"] = _ma(close, 3)
+    monthly["ma6"] = _ma(close, 6)
+    monthly["ma12"] = _ma(close, 12)
+
+    bb = _bollinger(close, 6)
+    monthly["bb_upper"] = bb[0]
+    monthly["bb_middle"] = bb[1]
+    monthly["bb_lower"] = bb[2]
+
+    monthly["rsi9"] = _rsi(close, 9)
+
+    monthly["volume_ma3"] = _ma(volume, 3)
+    monthly["volume_ma6"] = _ma(volume, 6)
+
+    monthly["stock_id"] = stock_id
+    monthly["trade_date"] = monthly["trade_date"].astype(str)
+
+    cols = ["stock_id", "trade_date", "close",
+            "ma3", "ma6", "ma12",
+            "bb_upper", "bb_middle", "bb_lower", "rsi9",
+            "volume_ma3", "volume_ma6"]
+    return monthly[cols].to_dict(orient="records")
+
+
 def rsi_signal(rsi_val: float) -> str:
     if rsi_val is None:
         return "unknown"
