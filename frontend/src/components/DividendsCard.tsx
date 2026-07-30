@@ -21,8 +21,8 @@ export default function DividendsCard({ stockId }: { stockId: string }) {
     queryFn: () => api.dividends(stockId),
   })
 
-  if (isLoading) return <div className="empty">載入中...</div>
-  if (!data || data.length === 0) return null
+  if (isLoading) return <div className="card"><h2>💵 股利分派（近 5 年）</h2><div className="empty">載入中...</div></div>
+  if (!data || data.length === 0) return <div className="card"><h2>💵 股利分派（近 5 年）</h2><div className="empty">暫無資料</div></div>
 
   const sorted = [...data].sort((a, b) => a.year - b.year)
 

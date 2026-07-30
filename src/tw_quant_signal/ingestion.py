@@ -157,18 +157,24 @@ class IngestionEngine:
             return "fail"
 
     def _ingest_monthly_revenue(self, run_date: str) -> str:
-        try:
-            total = 0
-            for sid in WATCH_STOCKS:
+        total = 0
+        errors = []
+        for sid in WATCH_STOCKS:
+            if sid == "0050":  # ETF, no MOPS monthly revenue
+                continue
+            try:
                 rows = fetch_monthly_revenue_batch(sid, months=36)
                 if rows:
                     self.db.upsert_monthly_revenue(rows)
                     total += len(rows)
-            self.db.log_pipeline(run_date, "monthly_revenue", "ok", f"records={total}")
-            return "ok"
-        except Exception as e:
-            self.db.log_pipeline(run_date, "monthly_revenue", "fail", str(e))
-            return "fail"
+            except Exception as e:
+                errors.append(f"{sid}:{e}")
+        status = "fail" if errors and total == 0 else "ok"
+        msg = f"records={total}"
+        if errors:
+            msg += f" errors={';'.join(errors)}"
+        self.db.log_pipeline(run_date, "monthly_revenue", status, msg)
+        return status
 
     def _ingest_quarterly_financials(self, run_date: str) -> str:
         try:

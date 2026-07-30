@@ -24,8 +24,8 @@ export default function MonthlyRevenueChart({ stockId }: { stockId: string }) {
     queryFn: () => api.monthlyRevenue(stockId),
   })
 
-  if (isLoading) return <div className="empty">載入中...</div>
-  if (!data || data.length === 0) return null
+  if (isLoading) return <div className="card"><h2>💰 月營收（近三年）</h2><div className="empty">載入中...</div></div>
+  if (!data || data.length === 0) return <div className="card"><h2>💰 月營收（近三年）</h2><div className="empty">暫無資料</div></div>
 
   const chartData = [...data].reverse()
 

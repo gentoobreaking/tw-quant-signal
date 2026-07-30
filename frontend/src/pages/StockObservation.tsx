@@ -1,10 +1,8 @@
-import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import HealthCheckCard from '../components/HealthCheckCard'
 import RiskCard from '../components/RiskCard'
 import PriceChart from '../components/PriceChart'
-import DashboardCharts from '../components/DashboardCharts'
 import SectorRankingCard from '../components/SectorRankingCard'
 import HealthAspectDetail from '../components/HealthAspectDetail'
 import MonthlyRevenueChart from '../components/MonthlyRevenueChart'
@@ -16,9 +14,6 @@ import type { StockDetail } from '../types'
 
 const STATE_LABEL: Record<string, string> = {
   bull: '📈 多頭', bear: '📉 空頭', range: '➡️ 盤整',
-}
-const STOCK_NAMES: Record<string, string> = {
-  '2330': '台積電', '0050': '元大台灣50', '2308': '台達電',
 }
 
 function StockDetailView({ stockId }: { stockId: string }) {
@@ -146,7 +141,7 @@ function StockDetailView({ stockId }: { stockId: string }) {
         </div>
       )}
 
-      {/* Institutional flows */}
+      {/* Institutional flows (from detail API) */}
       {data.institutional && data.institutional.length > 0 && (
         <div className="card">
           <h2>🏦 法人買賣超 (近10日)</h2>
@@ -178,57 +173,11 @@ function StockDetailView({ stockId }: { stockId: string }) {
   )
 }
 
-export default function StockObservation() {
-  const { data: stocks } = useQuery({
-    queryKey: ['stocks'],
-    queryFn: () => api.listStocks(),
-    refetchInterval: 60_000,
-  })
-
-  const [selected, setSelected] = useState<string>('2330')
-
+export default function StockObservation({ selectedStockId }: { selectedStockId: string }) {
   return (
     <div>
       <SectorRankingCard />
-      <DashboardCharts />
-
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-        {(stocks || []).map(s => {
-          const isActive = selected === s.id
-          return (
-            <div
-              key={s.id}
-              onClick={() => setSelected(s.id)}
-              style={{
-                background: isActive ? 'var(--blue)' : 'var(--bg-card)',
-                border: `1px solid ${isActive ? 'var(--blue)' : 'var(--border)'}`,
-                borderRadius: 8, padding: '10px 16px', cursor: 'pointer',
-                minWidth: 140, transition: 'all .15s',
-              }}
-            >
-              <div style={{ fontSize: 13, fontWeight: 600, display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: isActive ? '#fff' : 'var(--text)' }}>{s.id}</span>
-                <span style={{ color: isActive ? '#fff' : 'var(--text-dim)', fontSize: 11 }}>{s.name}</span>
-              </div>
-              <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4, color: isActive ? '#fff' : 'var(--text)' }}>
-                {s.close?.toFixed(1) ?? '-'}
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 11 }}>
-                <span style={{ color: s.change_pct != null && s.change_pct >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                  {s.change_pct != null ? `${s.change_pct >= 0 ? '+' : ''}${s.change_pct.toFixed(2)}%` : '-'}
-                </span>
-                <span style={{ color: isActive ? '#fff' : 'var(--text-dim)' }}>
-                  {s.health_score != null ? `${s.health_score.toFixed(0)}分` : '-'}
-                </span>
-                {s.risk_level && (
-                  <span className={`risk-badge ${s.risk_level}`}>{s.risk_score}</span>
-                )}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-      {selected && <StockDetailView stockId={selected} />}
+      <StockDetailView stockId={selectedStockId} />
     </div>
   )
 }

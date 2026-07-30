@@ -30,8 +30,8 @@ export default function QuarterlyFinancialsCard({ stockId }: { stockId: string }
     queryFn: () => api.quarterlyFinancials(stockId),
   })
 
-  if (isLoading) return <div className="empty">載入中...</div>
-  if (!data || data.length === 0) return null
+  if (isLoading) return <div className="card"><h2>📊 EPS（近 12 季）</h2><div className="empty">載入中...</div></div>
+  if (!data || data.length === 0) return <div className="card"><h2>📊 EPS（近 12 季）</h2><div className="empty">暫無資料</div></div>
 
   const chartData = [...data].reverse().slice(-12)
 

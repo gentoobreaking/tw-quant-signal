@@ -18,6 +18,19 @@ a { color: var(--blue); text-decoration: none; }
 .sidebar .nav-item:hover { background: var(--bg-hover); color: var(--text); }
 .sidebar .nav-item.active { background: var(--bg-hover); color: var(--blue); border-left: 3px solid var(--blue); }
 
+/* Sidebar stock list */
+.sidebar-section-label { font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: .5px; padding: 16px 16px 6px; }
+.sidebar-stocks { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; }
+.sidebar-stock-item { padding: 8px 10px; border-radius: 6px; cursor: pointer; transition: background .12s; }
+.sidebar-stock-item:hover { background: var(--bg-hover); }
+.sidebar-stock-item.active { background: var(--bg-hover); border-left: 3px solid var(--blue); border-radius: 0 6px 6px 0; margin-left: -8px; padding-left: 15px; }
+.sidebar-stock-main { display: flex; align-items: baseline; gap: 6px; }
+.sidebar-stock-id { font-size: 13px; font-weight: 700; color: var(--text); }
+.sidebar-stock-name { font-size: 11px; color: var(--text-dim); }
+.sidebar-stock-price { font-size: 16px; font-weight: 700; color: var(--text); margin: 2px 0; }
+.sidebar-stock-row { display: flex; justify-content: space-between; font-size: 11px; }
+.sidebar-stock-score { color: var(--text-dim); }
+
 /* Main content */
 .main-content { flex: 1; padding: 24px; max-width: calc(100vw - var(--sidebar-w)); overflow-x: auto; }
 

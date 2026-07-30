@@ -22,8 +22,8 @@ export default function MarginTradingCard({ stockId }: { stockId: string }) {
   const rows: any[] = Array.isArray(data) ? data : []
   const chartData = [...rows].reverse()
 
-  if (isLoading) return <div className="empty">載入中...</div>
-  if (rows.length === 0) return null
+  if (isLoading) return <div className="card"><h2>🔵 融資融券（近 20 日）</h2><div className="empty">載入中...</div></div>
+  if (rows.length === 0) return <div className="card"><h2>🔵 融資融券（近 20 日）</h2><div className="empty">暫無資料</div></div>
 
   return (
     <div className="card">
