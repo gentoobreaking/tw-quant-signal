@@ -174,26 +174,6 @@ function StockDetailView({ stockId }: { stockId: string }) {
       <DividendsCard stockId={stockId} />
       <InstitutionalFlowsCard stockId={stockId} />
       <MarginTradingCard stockId={stockId} />
-
-      {/* Financials */}
-      {data.financials && data.financials.length > 0 && (
-        <div className="card">
-          <h2>📋 財務數據</h2>
-          <table>
-            <thead><tr><th>季度</th><th>EPS</th><th>營收</th><th>毛利率</th></tr></thead>
-            <tbody>
-              {data.financials.slice(0, 8).map(f => (
-                <tr key={f.quarter}>
-                  <td>{f.quarter}</td>
-                  <td>{f.eps ?? '-'}</td>
-                  <td>{f.revenue != null ? `${(f.revenue / 1e8).toFixed(1)}億` : '-'}</td>
-                  <td>{f.gross_margin != null ? `${(f.gross_margin * 100).toFixed(1)}%` : '-'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
     </>
   )
 }

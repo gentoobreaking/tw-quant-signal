@@ -548,6 +548,13 @@ class SignalDB:
                 ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_latest_health_date(self) -> Optional[str]:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT MAX(trade_date) FROM health_scores"
+            ).fetchone()
+            return row[0] if row and row[0] else None
+
     def get_health_scores(self, trade_date: str, stock_id: str = None) -> list[dict]:
         with self.connect() as conn:
             import json

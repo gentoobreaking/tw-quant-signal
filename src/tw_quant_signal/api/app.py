@@ -326,7 +326,10 @@ SECTOR_MAP: dict[str, str] = {
 def sector_ranking_endpoint():
     """Aggregate health scores by sector and rank."""
     db = _get_db()
-    scores = db.get_health_scores()
+    latest = db.get_latest_health_date()
+    if not latest:
+        return {"data": []}
+    scores = db.get_health_scores(latest)
     
     sector_scores: dict[str, list[dict]] = {}
     for s in scores:
@@ -335,12 +338,12 @@ def sector_ranking_endpoint():
     
     ranking = []
     for sec, members in sorted(sector_scores.items()):
-        avg_score = round(sum(m["score"] for m in members) / len(members), 1) if members else 0
+        avg_score = round(sum(m["total_score"] for m in members) / len(members), 1) if members else 0
         ranking.append({
             "sector": sec,
             "count": len(members),
             "avg_score": avg_score,
-            "members": sorted(members, key=lambda x: x["score"], reverse=True),
+            "members": sorted(members, key=lambda x: x["total_score"], reverse=True),
         })
     
     ranking.sort(key=lambda x: x["avg_score"], reverse=True)
