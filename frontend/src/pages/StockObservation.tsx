@@ -65,19 +65,23 @@ function StockDetailView({ stockId }: { stockId: string }) {
       {/* Signals */}
       {data.signals && (data.signals[0] as any)?.triggered_rules && (
         <div className="card">
-          <h2>⚡ 觸發規則 ({data.signals[0].triggered_rules.length} 條)</h2>
-          <table>
-            <thead><tr><th>規則</th><th>類型</th><th>名稱</th></tr></thead>
-            <tbody>
-              {(JSON.parse(data.signals[0].triggered_rules) as any[]).map((tr: any, i: number) => (
-                <tr key={i}>
-                  <td><code>{tr.rule_id}</code></td>
-                  <td><span className={`light ${tr.type === 'bullish' ? 'green' : tr.type === 'bearish' ? 'red' : 'yellow'}`}>{tr.type}</span></td>
-                  <td>{tr.rule_name}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {(() => {
+            let triggered: any[] = [];
+            try { triggered = JSON.parse(data.signals[0].triggered_rules); } catch {}
+            return <><h2>⚡ 觸發規則 ({triggered.length} 條)</h2>
+            {triggered.length > 0 && <table>
+              <thead><tr><th>規則</th><th>類型</th><th>名稱</th></tr></thead>
+              <tbody>
+                {triggered.map((tr: any, i: number) => (
+                  <tr key={i}>
+                    <td><code>{tr.rule_id}</code></td>
+                    <td><span className={`light ${tr.type === 'bullish' ? 'green' : tr.type === 'bearish' ? 'red' : 'yellow'}`}>{tr.type}</span></td>
+                    <td>{tr.rule_name}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>}</>
+          })()}
         </div>
       )}
 
