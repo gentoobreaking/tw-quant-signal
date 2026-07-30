@@ -51,6 +51,8 @@ class IngestionEngine:
             rows = fetch_watch_stocks_prices()
             if rows:
                 self.db.upsert_daily_prices(rows)
+                for r in rows:
+                    self.db.compute_adj_close(r["stock_id"])
                 ids = [r["stock_id"] for r in rows]
                 self.db.log_pipeline(run_date, "watch_stocks", "ok", f"stocks={','.join(ids)}")
                 return "ok"

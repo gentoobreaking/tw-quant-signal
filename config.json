@@ -1,0 +1,11 @@
+{
+    "watch_stocks": ["2330", "0050", "2308"],
+    "notification": {
+        "telegram_bot_token": "",
+        "telegram_chat_id": "",
+        "discord_webhook_url": ""
+    },
+    "database": {
+        "path": "data/signal.db"
+    }
+}

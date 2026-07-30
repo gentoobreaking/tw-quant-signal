@@ -9,6 +9,8 @@ dependencies = [
     "numpy>=1.24.0",
     "python-dateutil>=2.8.0",
 ]
+[project.optional-dependencies]
+backfill = ["yfinance>=0.2.0"]
 
 [project.scripts]
 tw-quant-pipeline = "tw_quant_signal.pipeline:main"

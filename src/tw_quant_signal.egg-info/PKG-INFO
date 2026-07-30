@@ -6,3 +6,6 @@ Requires-Python: >=3.10
 Requires-Dist: httpx>=0.25.0
 Requires-Dist: pandas>=2.0.0
 Requires-Dist: numpy>=1.24.0
+Requires-Dist: python-dateutil>=2.8.0
+Provides-Extra: backfill
+Requires-Dist: yfinance>=0.2.0; extra == "backfill"

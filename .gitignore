@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+data/signal.db
+data/logs/
+.venv/
+*.egg-info/
+.Python

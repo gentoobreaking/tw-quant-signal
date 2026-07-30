@@ -1,10 +1,11 @@
-import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
-DB_PATH = os.getenv("TW_QUANT_DB", str(Path(__file__).parent.parent.parent / "data" / "signal.db"))
+from tw_quant_signal.config import settings
+
+DB_PATH = settings.db_path
 
 
 def _init_schema(conn: sqlite3.Connection):
@@ -123,12 +124,16 @@ class SignalDB:
     def upsert_daily_prices(self, rows: list[dict]):
         with self.connect() as conn:
             for r in rows:
+                close = r.get("close")
+                adj_close = r.get("adj_close", close)
+                adj_factor = r.get("adj_factor", 1.0)
                 conn.execute(
                     """INSERT OR REPLACE INTO daily_prices
-                       (stock_id, trade_date, open, high, low, close, volume, amount)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                       (stock_id, trade_date, open, high, low, close, volume, amount, adj_factor, adj_close)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     [r["stock_id"], r["trade_date"], r.get("open"), r.get("high"),
-                     r.get("low"), r.get("close"), r.get("volume"), r.get("amount")],
+                     r.get("low"), close, r.get("volume"), r.get("amount"),
+                     adj_factor, adj_close],
                 )
 
     def upsert_market_index(self, row: dict):
@@ -152,6 +157,28 @@ class SignalDB:
                      r.get("foreign_investors_net"), r.get("sity_investors_net"),
                      r.get("dealer_net"), r.get("dealer_proprietary_net"),
                      r.get("dealer_hedge_net"), r.get("total_net")],
+                )
+
+    def compute_adj_close(self, stock_id: str):
+        """Compute adj_close = close * adj_factor for all rows of a stock.
+        Uses cumulative adj_factor product from most recent to oldest.
+        """
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT trade_date, close, adj_factor FROM daily_prices WHERE stock_id=? ORDER BY trade_date DESC",
+                [stock_id],
+            ).fetchall()
+            if not rows:
+                return
+            factor = 1.0
+            for r in rows:
+                af = r["adj_factor"]
+                if af and af != 0:
+                    factor *= af
+                adj_close = (r["close"] or 0) * factor
+                conn.execute(
+                    "UPDATE daily_prices SET adj_close=? WHERE stock_id=? AND trade_date=?",
+                    [round(adj_close, 2), stock_id, r["trade_date"]],
                 )
 
     def upsert_tech_indicators(self, rows: list[dict]):

@@ -1,12 +1,13 @@
-import os
 from datetime import date
 from typing import Optional
 
 import httpx
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+from tw_quant_signal.config import settings
+
+TELEGRAM_BOT_TOKEN = settings.telegram_bot_token
+TELEGRAM_CHAT_ID = settings.telegram_chat_id
+DISCORD_WEBHOOK_URL = settings.discord_webhook_url
 
 
 def _send_telegram(message: str) -> bool:

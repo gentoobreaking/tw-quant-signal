@@ -1,6 +1,8 @@
 pyproject.toml
 src/tw_quant_signal/__init__.py
 src/tw_quant_signal/alerter.py
+src/tw_quant_signal/backfill.py
+src/tw_quant_signal/config.py
 src/tw_quant_signal/db.py
 src/tw_quant_signal/indicators.py
 src/tw_quant_signal/ingestion.py

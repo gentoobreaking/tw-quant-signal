@@ -6,11 +6,13 @@ from typing import Optional
 
 import httpx
 
+from tw_quant_signal.config import settings
+
 TWSE_OPENAPI = os.getenv("TWSE_BASE_URL", "https://openapi.twse.com.tw/v1")
 TWSE_RWD = "https://www.twse.com.tw/rwd/zh"
 _ROC_EPOCH = 1911
 
-WATCH_STOCKS = ["2330"]
+WATCH_STOCKS = settings.watch_stocks
 
 
 def _roc_to_ad(roc_date: str) -> str:
@@ -21,6 +23,8 @@ def _roc_to_ad(roc_date: str) -> str:
 def _safe_float(v) -> Optional[float]:
     if v is None:
         return None
+    if isinstance(v, str):
+        v = v.replace(",", "")
     try:
         return float(v)
     except (ValueError, TypeError):
@@ -30,6 +34,8 @@ def _safe_float(v) -> Optional[float]:
 def _safe_int(v) -> Optional[int]:
     if v is None:
         return None
+    if isinstance(v, str):
+        v = v.replace(",", "")
     try:
         return int(v)
     except (ValueError, TypeError):
