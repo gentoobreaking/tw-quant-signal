@@ -9,6 +9,7 @@ src/tw_quant_signal/features.py
 src/tw_quant_signal/indicators.py
 src/tw_quant_signal/ingestion.py
 src/tw_quant_signal/pipeline.py
+src/tw_quant_signal/reporter.py
 src/tw_quant_signal/rules.py
 src/tw_quant_signal/twse_client.py
 src/tw_quant_signal.egg-info/PKG-INFO

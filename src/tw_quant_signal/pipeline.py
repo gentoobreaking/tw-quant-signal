@@ -2,9 +2,11 @@ import sys
 from datetime import date, datetime
 
 from tw_quant_signal.db import SignalDB
+from tw_quant_signal.twse_client import WATCH_STOCKS
 from tw_quant_signal.ingestion import IngestionEngine
 from tw_quant_signal.rules import compute_rule_signals, store_rule_signals, _aggregate_rules
-from tw_quant_signal.alerter import send_health_alert, send_rules_report
+from tw_quant_signal.alerter import send_alert, send_rules_report, build_daily_report
+from tw_quant_signal.reporter import generate_markdown_report, generate_csv_report
 
 
 def _gather_report_data(db):
@@ -64,6 +66,26 @@ def main():
         print(f"  [{icon}] {k}: {v}")
 
     all_ok = all(v == "ok" for v in status.values())
+
+    # Anomaly detection
+    anomalies = []
+    for k, v in status.items():
+        if v == "fail":
+            anomalies.append(f"{k} 失敗")
+    if status.get("stocks") == "ok":
+        with db.connect() as conn:
+            cnt = conn.execute("SELECT COUNT(*) FROM daily_prices WHERE trade_date=?", [run_date]).fetchone()[0]
+        if cnt < len(WATCH_STOCKS) * 0.5:
+            anomalies.append(f"股價筆數異常 ({cnt})")
+    if status.get("features") == "ok":
+        with db.connect() as conn:
+            feat_cnt = conn.execute("SELECT COUNT(*) FROM features WHERE trade_date=?", [run_date]).fetchone()[0]
+            sig_cnt = conn.execute("SELECT COUNT(*) FROM rule_signals WHERE trade_date=?", [run_date]).fetchone()[0]
+        if feat_cnt == 0:
+            anomalies.append("無特徵資料")
+        if sig_cnt == 0:
+            anomalies.append("無訊號產出")
+
     db.log_pipeline(run_date, "pipeline", "ok" if all_ok else "fail",
                     f"index={status['index']},stocks={status['stocks']},"
                     f"inst={status['institutional']},ind={status['indicators']},"
@@ -78,8 +100,19 @@ def main():
     else:
         print("  ⚠ 無規則訊號產出")
 
+    # Generate report files
+    md_path = generate_markdown_report(db, run_date)
+    csv_path = generate_csv_report(db, run_date)
+    print(f"  → 報告: {md_path}")
+    print(f"  → CSV: {csv_path}")
+
+    # Anomaly alert
+    if anomalies:
+        msg = f"⚠️ *管線異常 — {run_date}*\n" + "\n".join(f"- {a}" for a in anomalies)
+        send_alert(msg)
+
     report_data = _gather_report_data(db)
-    send_health_alert(status, report_data)
+    send_alert(build_daily_report(status, report_data))
 
     print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 管線完成")
     return 0 if all_ok else 1

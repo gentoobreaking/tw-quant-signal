@@ -5,3 +5,4 @@ data/logs/
 .venv/
 *.egg-info/
 .Python
+data/reports/
