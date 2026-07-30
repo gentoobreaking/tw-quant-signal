@@ -122,6 +122,42 @@ def _init_schema(conn: sqlite3.Connection):
             PRIMARY KEY (stock_id, trade_date)
         );
 
+        CREATE TABLE IF NOT EXISTS quarterly_financials (
+            stock_id        TEXT NOT NULL,
+            fiscal_quarter  TEXT NOT NULL,
+            eps             REAL,
+            revenue         REAL,
+            gross_margin    REAL,
+            roe             REAL,
+            roa             REAL,
+            updated_at      TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            PRIMARY KEY (stock_id, fiscal_quarter)
+        );
+
+        CREATE TABLE IF NOT EXISTS dividends (
+            stock_id        TEXT NOT NULL,
+            year            INTEGER NOT NULL,
+            ex_date         TEXT,
+            close_before_ex  REAL,
+            cash_dividend   REAL,
+            cash_pay_date   TEXT,
+            cash_yield      REAL,
+            stock_dividend  REAL,
+            PRIMARY KEY (stock_id, year)
+        );
+
+        CREATE TABLE IF NOT EXISTS margin_trading (
+            stock_id    TEXT NOT NULL,
+            trade_date  TEXT NOT NULL,
+            margin_buy      INTEGER,
+            margin_sell     INTEGER,
+            margin_balance  INTEGER,
+            short_sell      INTEGER,
+            short_buy       INTEGER,
+            short_balance   INTEGER,
+            PRIMARY KEY (stock_id, trade_date)
+        );
+
         CREATE TABLE IF NOT EXISTS risk_metrics (
             trade_date      TEXT NOT NULL,
             stock_id        TEXT NOT NULL,
@@ -262,6 +298,15 @@ def _init_schema(conn: sqlite3.Connection):
             details         TEXT,
             created_at      TEXT NOT NULL DEFAULT (datetime('now','localtime'))
         );
+        CREATE TABLE IF NOT EXISTS monthly_revenue (
+            stock_id    TEXT NOT NULL,
+            year_month  TEXT NOT NULL,
+            revenue     REAL,
+            mom_change  REAL,
+            yoy_change  REAL,
+            PRIMARY KEY (stock_id, year_month)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_operation_log ON operation_log(log_date, action);
     """)
 
@@ -371,6 +416,51 @@ class SignalDB:
                     [r["stock_id"], r.get("fiscal_quarter"),
                      r.get("eps"), r.get("revenue"), r.get("gross_margin")],
                 )
+
+    def upsert_quarterly_financials(self, rows: list[dict]):
+        if not rows:
+            return
+        with self.connect() as conn:
+            for r in rows:
+                conn.execute(
+                    """INSERT OR REPLACE INTO quarterly_financials
+                    (stock_id, fiscal_quarter, eps, revenue, gross_margin, roe, roa)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    [r["stock_id"], r.get("fiscal_quarter"),
+                     r.get("eps"), r.get("revenue"), r.get("gross_margin"),
+                     r.get("roe"), r.get("roa")],
+                )
+
+    def get_quarterly_financials(self, stock_id: str, limit: int = 20) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM quarterly_financials WHERE stock_id=? ORDER BY fiscal_quarter DESC LIMIT ?",
+                [stock_id, limit],
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def upsert_dividends(self, rows: list[dict]):
+        if not rows:
+            return
+        with self.connect() as conn:
+            for r in rows:
+                conn.execute(
+                    """INSERT OR REPLACE INTO dividends
+                    (stock_id, year, ex_date, close_before_ex, cash_dividend, cash_pay_date, cash_yield, stock_dividend)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [r["stock_id"], r.get("year"),
+                     r.get("ex_date"), r.get("close_before_ex"),
+                     r.get("cash_dividend"), r.get("cash_pay_date"),
+                     r.get("cash_yield"), r.get("stock_dividend")],
+                )
+
+    def get_dividends(self, stock_id: str) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM dividends WHERE stock_id=? ORDER BY year DESC",
+                [stock_id],
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     def get_latest_financial_data(self, stock_id: str) -> Optional[dict]:
         with self.connect() as conn:
@@ -712,6 +802,27 @@ class SignalDB:
             result.append(d)
         return result
 
+    def upsert_monthly_revenue(self, rows: list[dict]):
+        if not rows:
+            return
+        with self.connect() as conn:
+            for r in rows:
+                conn.execute(
+                    """INSERT OR REPLACE INTO monthly_revenue
+                    (stock_id, year_month, revenue, mom_change, yoy_change)
+                    VALUES (?, ?, ?, ?, ?)""",
+                    [r["stock_id"], r.get("year_month"),
+                     r.get("revenue"), r.get("mom_change"), r.get("yoy_change")],
+                )
+
+    def get_monthly_revenue(self, stock_id: str, limit: int = 36) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM monthly_revenue WHERE stock_id=? ORDER BY year_month DESC LIMIT ?",
+                [stock_id, limit],
+            ).fetchall()
+            return [dict(r) for r in rows]
+
     def upsert_multi_timeframe_consensus(self, rows: list[dict]):
         import json
         if not rows:
@@ -782,6 +893,33 @@ class SignalDB:
             if isinstance(d.get("details"), str):
                 d["details"] = json.loads(d["details"])
         return result
+
+    def upsert_margin_trading(self, rows: list[dict]):
+        if not rows:
+            return
+        with self.connect() as conn:
+            for r in rows:
+                conn.execute(
+                    """INSERT OR REPLACE INTO margin_trading
+                    (stock_id, trade_date, margin_buy, margin_sell, margin_balance,
+                     short_sell, short_buy, short_balance)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [r["stock_id"], r.get("trade_date"),
+                     r.get("margin_buy"), r.get("margin_sell"), r.get("margin_balance"),
+                     r.get("short_sell"), r.get("short_buy"), r.get("short_balance")],
+                )
+
+    def get_margin_trading(self, stock_id: str, limit: int = 20) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM margin_trading
+                WHERE stock_id=? ORDER BY trade_date DESC LIMIT ?""",
+                [stock_id, limit],
+            ).fetchall()
+            return [{"stock_id": r[0], "trade_date": r[1], "margin_buy": r[2],
+                     "margin_sell": r[3], "margin_balance": r[4],
+                     "short_sell": r[5], "short_buy": r[6], "short_balance": r[7]}
+                    for r in rows]
 
     def get_institutional_flows(self, stock_id: str, limit: int = 20) -> list[dict]:
         with self.connect() as conn:

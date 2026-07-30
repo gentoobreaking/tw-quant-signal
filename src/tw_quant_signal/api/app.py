@@ -14,7 +14,7 @@ from tw_quant_signal.db import SignalDB
 from tw_quant_signal.config import settings
 from tw_quant_signal.multi_timeframe import compute_multi_timeframe
 
-app = FastAPI(title="tw-quant-signal API", version="1.0.0")
+app = FastAPI(title="tw-quant-signal API", version="1.0.0", on_startup=[lambda: _get_db().init_db()])
 
 app.add_middleware(
     CORSMiddleware,
@@ -291,6 +291,73 @@ def monthly_health():
     db = _get_db()
     today = date.today().isoformat()
     rows = db.get_monthly_health_scores(today)
+    return {"data": rows}
+
+
+@app.get("/api/stocks/{stock_id}/dividends")
+def stock_dividends(stock_id: str):
+    db = _get_db()
+    rows = db.get_dividends(stock_id)
+    return {"data": rows}
+
+
+@app.get("/api/stocks/{stock_id}/margin-trading")
+def stock_margin_trading(stock_id: str):
+    db = _get_db()
+    rows = db.get_margin_trading(stock_id, limit=20)
+    return {"data": rows}
+
+
+@app.get("/api/stocks/{stock_id}/institutional-flows")
+def stock_institutional_flows(stock_id: str):
+    db = _get_db()
+    rows = db.get_institutional_flows(stock_id, limit=60)
+    return {"data": rows}
+
+
+SECTOR_MAP: dict[str, str] = {
+    "2330": "半導體",
+    "2308": "半導體",
+    "0050": "ETF",
+}
+
+
+@app.get("/api/sector-ranking")
+def sector_ranking_endpoint():
+    """Aggregate health scores by sector and rank."""
+    db = _get_db()
+    scores = db.get_health_scores()
+    
+    sector_scores: dict[str, list[dict]] = {}
+    for s in scores:
+        sec = SECTOR_MAP.get(s["stock_id"], "其他")
+        sector_scores.setdefault(sec, []).append(s)
+    
+    ranking = []
+    for sec, members in sorted(sector_scores.items()):
+        avg_score = round(sum(m["score"] for m in members) / len(members), 1) if members else 0
+        ranking.append({
+            "sector": sec,
+            "count": len(members),
+            "avg_score": avg_score,
+            "members": sorted(members, key=lambda x: x["score"], reverse=True),
+        })
+    
+    ranking.sort(key=lambda x: x["avg_score"], reverse=True)
+    return {"data": ranking}
+
+
+@app.get("/api/stocks/{stock_id}/quarterly-financials")
+def stock_quarterly_financials(stock_id: str):
+    db = _get_db()
+    rows = db.get_quarterly_financials(stock_id, limit=20)
+    return {"data": rows}
+
+
+@app.get("/api/stocks/{stock_id}/monthly-revenue")
+def stock_monthly_revenue(stock_id: str):
+    db = _get_db()
+    rows = db.get_monthly_revenue(stock_id, limit=36)
     return {"data": rows}
 
 

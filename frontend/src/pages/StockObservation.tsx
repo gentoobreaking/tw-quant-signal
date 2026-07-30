@@ -5,7 +5,13 @@ import HealthCheckCard from '../components/HealthCheckCard'
 import RiskCard from '../components/RiskCard'
 import PriceChart from '../components/PriceChart'
 import DashboardCharts from '../components/DashboardCharts'
+import SectorRankingCard from '../components/SectorRankingCard'
 import HealthAspectDetail from '../components/HealthAspectDetail'
+import MonthlyRevenueChart from '../components/MonthlyRevenueChart'
+import QuarterlyFinancialsCard from '../components/QuarterlyFinancialsCard'
+import DividendsCard from '../components/DividendsCard'
+import InstitutionalFlowsCard from '../components/InstitutionalFlowsCard'
+import MarginTradingCard from '../components/MarginTradingCard'
 import type { StockDetail } from '../types'
 
 const STATE_LABEL: Record<string, string> = {
@@ -160,6 +166,15 @@ function StockDetailView({ stockId }: { stockId: string }) {
         </div>
       )}
 
+      {/* Monthly Revenue */}
+      <MonthlyRevenueChart stockId={stockId} />
+
+      {/* Quarterly Financials */}
+      <QuarterlyFinancialsCard stockId={stockId} />
+      <DividendsCard stockId={stockId} />
+      <InstitutionalFlowsCard stockId={stockId} />
+      <MarginTradingCard stockId={stockId} />
+
       {/* Financials */}
       {data.financials && data.financials.length > 0 && (
         <div className="card">
@@ -194,6 +209,7 @@ export default function StockObservation() {
 
   return (
     <div>
+      <SectorRankingCard />
       <DashboardCharts />
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>

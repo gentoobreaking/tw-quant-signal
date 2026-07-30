@@ -12,6 +12,42 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   return (json.data ?? json) as T
 }
 
+export interface MonthlyRevenue {
+  stock_id: string
+  year_month: string
+  revenue: number | null
+  mom_change: number | null
+  yoy_change: number | null
+}
+
+export interface QuarterlyFinancial {
+  stock_id: string
+  fiscal_quarter: string
+  eps: number | null
+  revenue: number | null
+  gross_margin: number | null
+  roe: number | null
+  roa: number | null
+}
+
+export interface Dividend {
+  stock_id: string
+  year: number
+  ex_date: string | null
+  close_before_ex: number | null
+  cash_dividend: number | null
+  cash_pay_date: string | null
+  cash_yield: number | null
+  stock_dividend: number | null
+}
+
+export interface SectorRank {
+  sector: string
+  count: number
+  avg_score: number
+  members: { stock_id: string; stock_name: string; score: number }[]
+}
+
 export const api = {
   listStocks: () => request<Stock[]>('/stocks'),
   stockDetail: (id: string) => request<StockDetail>(`/stocks/${id}/detail`),
@@ -25,6 +61,12 @@ export const api = {
   updateHealthCheckConfig: (body: Record<string, any>) => request('/health-check-config', { method: 'PUT', body: JSON.stringify(body) }),
   rules: () => request<Rule[]>('/rules'),
   updateRules: (rules: Rule[]) => request('/rules', { method: 'PUT', body: JSON.stringify({ rules }) }),
+  monthlyRevenue: (id: string) => request<MonthlyRevenue[]>(`/stocks/${id}/monthly-revenue`),
+  quarterlyFinancials: (id: string) => request<QuarterlyFinancial[]>(`/stocks/${id}/quarterly-financials`),
+  dividends: (id: string) => request<Dividend[]>(`/stocks/${id}/dividends`),
+  marginTrading: (id: string) => request<unknown[]>(`/stocks/${id}/margin-trading`),
+  institutionalFlows: (id: string) => request<unknown[]>(`/stocks/${id}/institutional-flows`),
+  sectorRanking: () => request<SectorRank[]>(`/sector-ranking`),
   config: () => request<{ watch_stocks: string[] }>('/config'),
   updateConfig: (body: { watch_stocks?: string[] }) => request('/config', { method: 'PUT', body: JSON.stringify(body) }),
 }

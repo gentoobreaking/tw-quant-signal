@@ -229,6 +229,43 @@ def fetch_margin_data(trade_date: str = None) -> dict[str, dict]:
     return result
 
 
+def fetch_margin_trading_detailed(trade_date: str = None) -> list[dict]:
+    """Fetch detailed margin trading (融資融券買賣明細) from TWSE TWT93U.
+
+    Returns list with per-stock detail:
+      {stock_id, trade_date, margin_buy, margin_sell, margin_balance,
+       short_sell, short_buy, short_balance}
+    """
+    raw = (trade_date or date.today().isoformat()).replace("-", "")
+    url = f"{TWSE_RWD.replace('/rwd/zh', '/zh')}/exchangeReport/TWT93U?date={raw}&response=json"
+    with httpx.Client(timeout=30) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+        payload = resp.json()
+    if payload.get("stat") != "OK":
+        return []
+    rows = payload.get("data", [])
+    trade_date_str = raw[:4] + "-" + raw[4:6] + "-" + raw[6:8]
+    result = []
+    for r in rows:
+        if len(r) < 15:
+            continue
+        code = r[0].strip()
+        if not code:
+            continue
+        result.append({
+            "stock_id": code,
+            "trade_date": trade_date_str,
+            "margin_buy": _safe_int_stripped(r[2]),
+            "margin_sell": _safe_int_stripped(r[3]),
+            "margin_balance": _safe_int_stripped(r[6]),
+            "short_sell": _safe_int_stripped(r[9]),
+            "short_buy": _safe_int_stripped(r[8]),
+            "short_balance": _safe_int(r[12]),
+        })
+    return result
+
+
 def fetch_monthly_revenue(stock_id: str, year: int = None, month: int = None) -> Optional[dict]:
     """Fetch monthly revenue from MOPS ajax_t05st10_ifrs.
 
@@ -274,6 +311,173 @@ def fetch_monthly_revenue(stock_id: str, year: int = None, month: int = None) ->
         "year": year + 1911,
         "month": month,
     }
+
+
+def fetch_monthly_revenue_batch(stock_id: str, months: int = 36) -> list[dict]:
+    """Fetch up to `months` of monthly revenue for a stock, computing mom_change.
+
+    Returns list of dicts sorted by year_month ascending:
+      [{stock_id, year_month, revenue, mom_change, yoy_change}, ...]
+    """
+    from bs4 import BeautifulSoup as _BS
+    today = date.today()
+    results = []
+    seen = set()
+
+    for offset in range(months):
+        m = today.month - offset
+        y = today.year
+        while m < 1:
+            m += 12
+            y -= 1
+        roc_year = y - 1911
+        if roc_year < 100:
+            continue
+        key = f"{stock_id}-{y}-{m:02d}"
+        if key in seen:
+            continue
+        seen.add(key)
+
+        url = "https://mopsov.twse.com.tw/mops/web/ajax_t05st10_ifrs"
+        data = {
+            "step": "1", "firstin": "true", "off": "1",
+            "TYPEK": "sii", "year": str(roc_year), "month": f"{m:02d}", "co_id": stock_id,
+        }
+        with httpx.Client(timeout=15) as client:
+            try:
+                resp = client.post(url, data=data)
+                resp.encoding = "utf-8"
+                soup = _BS(resp.text, "html.parser")
+            except Exception:
+                time.sleep(0.3)
+                continue
+
+        tables = soup.find_all("table")
+        if len(tables) < 4:
+            time.sleep(0.3)
+            continue
+        trs = tables[3].find_all("tr")
+        if len(trs) < 5:
+            time.sleep(0.3)
+            continue
+
+        def _get_val(row_idx):
+            vals = [c.get_text(strip=True).replace(",", "") for c in trs[row_idx].find_all(["td", "th"])]
+            return vals[-1] if vals else None
+
+        try:
+            revenue = int(_get_val(1))
+            prev_revenue = int(_get_val(2))
+            yoy_pct = float(_get_val(4))
+        except (ValueError, TypeError, IndexError):
+            revenue = None
+            prev_revenue = None
+            yoy_pct = None
+
+        if not revenue:
+            time.sleep(0.3)
+            continue
+
+        results.append({
+            "stock_id": stock_id,
+            "year_month": f"{y}-{m:02d}",
+            "revenue": revenue,
+            "yoy_change": yoy_pct,
+        })
+        time.sleep(0.3)
+
+    # Sort ascending to compute mom_change
+    results.sort(key=lambda r: r["year_month"])
+    for i in range(1, len(results)):
+        prev_rev = results[i - 1]["revenue"]
+        if prev_rev and prev_rev > 0:
+            results[i]["mom_change"] = round((results[i]["revenue"] - prev_rev) / prev_rev * 100, 2)
+        else:
+            results[i]["mom_change"] = None
+    results[0]["mom_change"] = None
+
+    return results
+
+
+def fetch_yf_quarterly_financials_batch(stock_id: str, max_quarters: int = 20) -> list[dict]:
+    """Fetch quarterly financials (eps, revenue, gross_margin, roe, roa) via yfinance.
+
+    Returns list sorted by fiscal_quarter ascending (oldest first).
+    ROE = Net Income / Total Stockholder Equity; ROA = Net Income / Total Assets.
+    """
+    try:
+        import yfinance as yf
+        import pandas as pd
+    except ImportError:
+        return []
+    try:
+        ticker = yf.Ticker(f"{stock_id}.TW")
+    except Exception:
+        return []
+
+    fs = ticker.quarterly_financials
+    bs = ticker.quarterly_balance_sheet
+    if fs is None or fs.empty:
+        return []
+
+    results = []
+    for col in fs.columns:
+        q_label = str(col)[:7]
+
+        rev = None
+        if "Total Revenue" in fs.index:
+            v = fs.loc["Total Revenue", col]
+            rev = float(v) if not pd.isna(v) else None
+
+        gp = None
+        if "Gross Profit" in fs.index:
+            v = fs.loc["Gross Profit", col]
+            gp = float(v) if not pd.isna(v) else None
+
+        eps = None
+        if "Diluted EPS" in fs.index:
+            v = fs.loc["Diluted EPS", col]
+            eps = float(v) if not pd.isna(v) else None
+
+        net_income = None
+        if "Net Income" in fs.index:
+            v = fs.loc["Net Income", col]
+            net_income = float(v) if not pd.isna(v) else None
+
+        gross_margin = round(gp / rev * 100, 2) if rev and gp and rev > 0 else None
+
+        # ROE / ROA from balance sheet
+        roe = None
+        roa = None
+        if bs is not None and not bs.empty and col in bs.columns:
+            total_equity = None
+            total_assets = None
+            if "Total Stockholder Equity" in bs.index:
+                v = bs.loc["Total Stockholder Equity", col]
+                total_equity = float(v) if not pd.isna(v) else None
+            if "Total Assets" in bs.index:
+                v = bs.loc["Total Assets", col]
+                total_assets = float(v) if not pd.isna(v) else None
+
+            if net_income and total_equity and total_equity > 0:
+                roe = round(net_income / total_equity * 100, 2)
+            if net_income and total_assets and total_assets > 0:
+                roa = round(net_income / total_assets * 100, 2)
+
+        results.append({
+            "stock_id": stock_id,
+            "fiscal_quarter": q_label,
+            "eps": round(eps, 2) if eps else None,
+            "revenue": rev,
+            "gross_margin": gross_margin,
+            "roe": roe,
+            "roa": roa,
+        })
+        if len(results) >= max_quarters:
+            break
+
+    results.sort(key=lambda r: r["fiscal_quarter"])
+    return results
 
 
 def fetch_yf_financials(stock_id: str) -> Optional[dict]:
