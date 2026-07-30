@@ -101,6 +101,23 @@ def _init_schema(conn: sqlite3.Connection):
             volume_ma20    REAL,
             PRIMARY KEY (stock_id, trade_date)
         );
+
+        CREATE TABLE IF NOT EXISTS health_scores (
+            trade_date          TEXT NOT NULL,
+            stock_id            TEXT NOT NULL,
+            fundamental_score   REAL,
+            fundamental_light   TEXT,
+            institutional_score REAL,
+            institutional_light TEXT,
+            technical_score     REAL,
+            technical_light     TEXT,
+            valuation_score     REAL,
+            valuation_light     TEXT,
+            total_score         REAL,
+            total_light         TEXT,
+            details             TEXT,
+            PRIMARY KEY (trade_date, stock_id)
+        );
     """)
 
 
@@ -195,6 +212,33 @@ class SignalDB:
                 conn.execute(
                     "INSERT INTO features (trade_date, stock_id, data) VALUES (?, ?, ?)",
                     [trade_date, stock_id, json.dumps(r, ensure_ascii=False)],
+                )
+
+    def upsert_health_scores(self, rows: list[dict]):
+        import json
+        if not rows:
+            return
+        with self.connect() as conn:
+            for r in rows:
+                conn.execute("DELETE FROM health_scores WHERE trade_date=? AND stock_id=?",
+                             [r["trade_date"], r["stock_id"]])
+                conn.execute(
+                    """INSERT INTO health_scores
+                    (trade_date, stock_id, fundamental_score, fundamental_light,
+                     institutional_score, institutional_light,
+                     technical_score, technical_light,
+                     valuation_score, valuation_light,
+                     total_score, total_light, details)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [
+                        r["trade_date"], r["stock_id"],
+                        r.get("fundamental_score"), r.get("fundamental_light"),
+                        r.get("institutional_score"), r.get("institutional_light"),
+                        r.get("technical_score"), r.get("technical_light"),
+                        r.get("valuation_score"), r.get("valuation_light"),
+                        r.get("total_score"), r.get("total_light"),
+                        json.dumps(r.get("details", {}), ensure_ascii=False),
+                    ],
                 )
 
     def compute_adj_close(self, stock_id: str):

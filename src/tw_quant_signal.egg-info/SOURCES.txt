@@ -6,6 +6,7 @@ src/tw_quant_signal/backtest.py
 src/tw_quant_signal/config.py
 src/tw_quant_signal/db.py
 src/tw_quant_signal/features.py
+src/tw_quant_signal/health_check.py
 src/tw_quant_signal/indicators.py
 src/tw_quant_signal/ingestion.py
 src/tw_quant_signal/pipeline.py

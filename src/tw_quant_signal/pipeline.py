@@ -7,6 +7,7 @@ from tw_quant_signal.ingestion import IngestionEngine
 from tw_quant_signal.rules import compute_rule_signals, store_rule_signals, _aggregate_rules
 from tw_quant_signal.alerter import send_alert, send_rules_report, build_daily_report
 from tw_quant_signal.reporter import generate_markdown_report, generate_csv_report
+from tw_quant_signal.health_check import compute_health_check
 
 
 def _gather_report_data(db):
@@ -65,6 +66,20 @@ def main():
         icon = "✓" if v == "ok" else ("–" if v == "skip" else "✗")
         print(f"  [{icon}] {k}: {v}")
 
+    # Health check scoring
+    try:
+        health_scores = compute_health_check(db, run_date)
+        if health_scores:
+            db.upsert_health_scores(health_scores)
+            print(f"  → {len(health_scores)} 筆四燈號健診評分")
+            status["health_check"] = "ok"
+        else:
+            print("  ⚠ 無健診評分產出")
+            status["health_check"] = "skip"
+    except Exception as e:
+        print(f"  ✗ 健診評分失敗: {e}")
+        status["health_check"] = "fail"
+
     all_ok = all(v == "ok" for v in status.values())
 
     # Anomaly detection
@@ -89,7 +104,7 @@ def main():
     db.log_pipeline(run_date, "pipeline", "ok" if all_ok else "fail",
                     f"index={status['index']},stocks={status['stocks']},"
                     f"inst={status['institutional']},ind={status['indicators']},"
-                    f"features={status['features']}")
+                    f"features={status['features']},health={status.get('health_check','skip')}")
 
     rules_result = compute_rule_signals(db, run_date)
     triggered_total = sum(r["triggered_count"] for r in rules_result)

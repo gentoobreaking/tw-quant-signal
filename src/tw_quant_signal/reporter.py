@@ -66,6 +66,30 @@ def generate_markdown_report(db: SignalDB, run_date: str | None = None) -> str:
         md.append(f"- 漲跌: {idx[2]:+.2f}%" if idx[2] else "- 漲跌: -")
         md.append("")
 
+    with db.connect() as conn:
+        health_rows = conn.execute(
+            "SELECT stock_id, fundamental_score, fundamental_light, "
+            "institutional_score, institutional_light, "
+            "technical_score, technical_light, "
+            "valuation_score, valuation_light, "
+            "total_score, total_light "
+            "FROM health_scores WHERE trade_date=? ORDER BY stock_id",
+            [run_date],
+        ).fetchall()
+
+    if health_rows:
+        md.append("## 四燈號健診評分")
+        md.append("")
+        md.append("| 標的 | 總分 | 燈號 | 基本面 | 籌碼面 | 技術面 | 估值面 |")
+        md.append("|------|------|------|--------|--------|--------|--------|")
+        for r in health_rows:
+            md.append(
+                f"| {r[0]} | {r[9]:.0f} | {r[10]} | "
+                f"{r[1]:.0f} {r[2]} | {r[3]:.0f} {r[4]} | "
+                f"{r[5]:.0f} {r[6]} | {r[7]:.0f} {r[8]} |"
+            )
+        md.append("")
+
     report = "\n".join(md)
     path = REPORT_DIR / f"report_{run_date}.md"
     path.write_text(report, encoding="utf-8")
