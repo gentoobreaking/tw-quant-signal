@@ -1,10 +1,50 @@
-"""每日盤後資料管線 — 主入口"""
 import sys
 from datetime import date, datetime
 
 from tw_quant_signal.db import SignalDB
 from tw_quant_signal.ingestion import IngestionEngine
 from tw_quant_signal.alerter import send_health_alert
+
+
+def _gather_report_data(db):
+    data = {}
+    with db.connect() as conn:
+        idx = conn.execute(
+            "SELECT trade_date, close, change_pct FROM market_index ORDER BY trade_date DESC LIMIT 1"
+        ).fetchone()
+        if idx:
+            data["index"] = {"date": idx[0], "close": idx[1], "change_pct": idx[2]}
+
+        stocks = []
+        for sid in ["2330", "0050", "2308"]:
+            r = conn.execute(
+                "SELECT trade_date, close, adj_close FROM daily_prices WHERE stock_id=? ORDER BY trade_date DESC LIMIT 1",
+                [sid],
+            ).fetchone()
+            if r:
+                stocks.append({"id": sid, "date": r[0], "close": r[1], "adj_close": r[2]})
+                inst = conn.execute(
+                    "SELECT foreign_investors_net, sity_investors_net, dealer_net FROM institutional_flows WHERE stock_id=? ORDER BY trade_date DESC LIMIT 1",
+                    [sid],
+                ).fetchone()
+                if inst:
+                    stocks[-1]["foreign"] = inst[0]
+                    stocks[-1]["sity"] = inst[1]
+                    stocks[-1]["dealer"] = inst[2]
+                ind = conn.execute(
+                    "SELECT ma5, ma20, ma60, rsi14, bb_upper, bb_middle, bb_lower FROM tech_indicators WHERE stock_id=? ORDER BY trade_date DESC LIMIT 1",
+                    [sid],
+                ).fetchone()
+                if ind:
+                    stocks[-1]["ma5"] = ind[0]
+                    stocks[-1]["ma20"] = ind[1]
+                    stocks[-1]["ma60"] = ind[2]
+                    stocks[-1]["rsi14"] = ind[3]
+                    stocks[-1]["bb_upper"] = ind[4]
+                    stocks[-1]["bb_middle"] = ind[5]
+                    stocks[-1]["bb_lower"] = ind[6]
+        data["stocks"] = stocks
+    return data
 
 
 def main():
@@ -18,7 +58,6 @@ def main():
 
     status = engine.run_daily(run_date)
 
-    index_data = None
     for k, v in status.items():
         icon = "✓" if v == "ok" else ("–" if v == "skip" else "✗")
         print(f"  [{icon}] {k}: {v}")
@@ -28,8 +67,8 @@ def main():
                     f"index={status['index']},stocks={status['stocks']},"
                     f"inst={status['institutional']},ind={status['indicators']}")
 
-    # Send health alert
-    send_health_alert(status, index_data)
+    report_data = _gather_report_data(db)
+    send_health_alert(status, report_data)
 
     print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 管線完成")
     return 0 if all_ok else 1

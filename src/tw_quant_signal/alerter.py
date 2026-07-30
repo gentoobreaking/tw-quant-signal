@@ -44,25 +44,100 @@ def send_alert(message: str) -> bool:
     return sent
 
 
-def build_daily_report(status: dict, index_data: Optional[dict] = None) -> str:
-    run_date = date.today().isoformat()
-    lines = [
-        f"📊 *台股訊號管線 — {run_date}*",
-        "",
-        "```",
-        f"大盤指數 : {'OK' if status.get('index')=='ok' else '❌ '+str(status.get('index'))}  "
-        f"{'('+str(index_data.get('close','-'))+')' if index_data else ''}",
-        f"權值股   : {'OK' if status.get('stocks')=='ok' else '❌ '+str(status.get('stocks'))}",
-        f"法人買賣 : {'OK' if status.get('institutional')=='ok' else str(status.get('institutional'))}",
-        f"技術指標 : {'OK' if status.get('indicators')=='ok' else '❌ '+str(status.get('indicators'))}",
-        "```",
-    ]
+STOCK_NAMES = {"2330": "台積電", "0050": "元大台灣50", "2308": "台達電"}
+
+
+def _fmt(v, decimals=0):
+    if v is None:
+        return "-"
+    if decimals == 0:
+        return f"{int(v):,}"
+    return f"{v:,.{decimals}f}"
+
+
+def _ma_signal(ma5, ma20, ma60):
+    if ma5 is None or ma20 is None or ma60 is None:
+        return "", ""
+    if ma5 > ma20 > ma60:
+        return "📈多頭", "🟢"
+    if ma5 < ma20 < ma60:
+        return "📉空頭", "🔴"
+    return "➡️整理", "🟡"
+
+
+def _rsi_signal(val):
+    if val is None:
+        return "", ""
+    if val >= 70:
+        return "過熱", "🔴"
+    if val <= 30:
+        return "超賣", "🔵"
+    if 50 <= val < 70:
+        return "偏多", "🟢"
+    return "偏空", "🟡"
+
+
+def _bb_signal(close, upper, lower):
+    if close is None or upper is None or lower is None:
+        return ""
+    if close >= upper:
+        return " 📈觸上軌"
+    if close <= lower:
+        return " 📉破下軌"
+    return ""
+
+
+def build_daily_report(status: dict, report_data: Optional[dict] = None) -> str:
+    run_date = date.today()
+    lines = [f"📊 *台股訊號 — {run_date.month:02d}/{run_date.day:02d}*", ""]
+
+    idx = (report_data or {}).get("index")
+    if idx:
+        arrow = "📈" if idx.get("change_pct") and idx["change_pct"] >= 0 else "📉"
+        lines.append(f"🏛 大盤 {_fmt(idx['close'], 2)}  ({_fmt(idx['change_pct'], 2)}%) {arrow}")
+
+    stocks = (report_data or {}).get("stocks", [])
+    for s in stocks:
+        name = STOCK_NAMES.get(s["id"], s["id"])
+        lines.append("")
+        lines.append(f"*{s['id']} {name}*　{_fmt(s['close'], 2)}")
+        if s.get("ma5"):
+            ma_label, ma_color = _ma_signal(s["ma5"], s["ma20"], s["ma60"])
+            _, rsi_color = _rsi_signal(s["rsi14"])
+            bb = _bb_signal(s.get("adj_close"), s.get("bb_upper"), s.get("bb_lower"))
+
+            lines.append(
+                f"  {ma_color}均線 {ma_label}  "
+                f"{rsi_color}RSI {_fmt(s['rsi14'], 1)}  "
+                f"{bb}"
+            )
+            lines.append(
+                f"    MA5 {_fmt(s['ma5'], 1)}  MA20 {_fmt(s['ma20'], 1)}  MA60 {_fmt(s['ma60'], 1)}"
+            )
+
+            if s.get("foreign") is not None:
+                f = s["foreign"] / 1000
+                st = s.get("sity", 0) / 1000
+                d = s.get("dealer", 0) / 1000
+                f_color = "🔴" if f < -500 else ("🟢" if f > 500 else "⚪")
+                st_color = "🔴" if st < -200 else ("🟢" if st > 200 else "⚪")
+                d_color = "🔴" if d < -200 else ("🟢" if d > 200 else "⚪")
+                lines.append(
+                    f"  外資 {f_color}{_fmt(f)}k  "
+                    f"投信 {st_color}{_fmt(st)}k  "
+                    f"自營 {d_color}{_fmt(d)}k"
+                )
+        else:
+            status_icon = "✓" if status.get("stocks") == "ok" else "✗"
+            lines.append(f"  [{status_icon}]")
+
     if any(v == "fail" for v in status.values()):
         failed = [k for k, v in status.items() if v == "fail"]
-        lines.append(f"\n⚠️ *異常任務：* {', '.join(failed)}")
+        lines.append(f"\n⚠️ *異常：* {', '.join(failed)}")
+
     return "\n".join(lines)
 
 
-def send_health_alert(status: dict, index_data: Optional[dict] = None):
-    report = build_daily_report(status, index_data)
+def send_health_alert(status: dict, report_data: Optional[dict] = None):
+    report = build_daily_report(status, report_data)
     return send_alert(report)
