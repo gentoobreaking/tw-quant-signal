@@ -79,7 +79,16 @@ def _stock_risk(db: SignalDB, stock_id: str, trade_date: str) -> Optional[dict]:
         if ind:
             ma20_val = ind[0]
             ma60_val = ind[1]
-    stop_loss_ma = min(ma20_val or current_close, ma60_val or current_close) if ma20_val or ma60_val else None
+    if ma20_val and ma60_val:
+        if current_close > ma20_val:
+            stop_loss_ma = ma20_val
+        elif current_close > ma60_val:
+            stop_loss_ma = ma60_val
+        else:
+            recent_lows = [r[1] for r in prices[1:21] if r[1] is not None]
+            stop_loss_ma = min(recent_lows) if recent_lows else current_close * 0.95
+    else:
+        stop_loss_ma = None
 
     details = {}
 
