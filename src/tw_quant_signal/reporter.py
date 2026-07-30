@@ -60,8 +60,19 @@ def generate_markdown_report(db: SignalDB, run_date: str | None = None) -> str:
             "SELECT trade_date, close, change_pct FROM market_index ORDER BY trade_date DESC LIMIT 1"
         ).fetchone()
 
+    with db.connect() as conn:
+        ms_row = conn.execute(
+            "SELECT message FROM pipeline_log WHERE run_date=? AND task='market_state' ORDER BY id DESC LIMIT 1",
+            [run_date],
+        ).fetchone()
+    ms_text = ""
+    if ms_row:
+        parts = dict(p.split("=") for p in ms_row[0].split(",") if "=" in p)
+        state_map = {"bull": "📈多頭", "bear": "📉空頭", "range": "➡️盤整", "unknown": "❓"}
+        ms_text = f"（{state_map.get(parts.get('state',''),'❓')}）"
+
     if idx:
-        md.append(f"## 大盤概況")
+        md.append(f"## 大盤概況{ms_text}")
         md.append(f"- 收盤: {idx[1]:,.0f}")
         md.append(f"- 漲跌: {idx[2]:+.2f}%" if idx[2] else "- 漲跌: -")
         md.append("")
