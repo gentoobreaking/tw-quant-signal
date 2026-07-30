@@ -1,0 +1,8 @@
+Metadata-Version: 2.4
+Name: tw-quant-signal
+Version: 0.1.0
+Summary: 台股 AI 訊號系統 — 四燈號健診資料管線
+Requires-Python: >=3.10
+Requires-Dist: httpx>=0.25.0
+Requires-Dist: pandas>=2.0.0
+Requires-Dist: numpy>=1.24.0

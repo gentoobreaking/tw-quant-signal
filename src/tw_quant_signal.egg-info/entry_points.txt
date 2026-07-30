@@ -1,0 +1,3 @@
+[console_scripts]
+tw-quant-backfill = tw_quant_signal.backfill:main
+tw-quant-pipeline = tw_quant_signal.pipeline:main

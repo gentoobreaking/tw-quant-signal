@@ -1,0 +1,18 @@
+[project]
+name = "tw-quant-signal"
+version = "0.1.0"
+description = "台股 AI 訊號系統 — 四燈號健診資料管線"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.25.0",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "python-dateutil>=2.8.0",
+]
+
+[project.scripts]
+tw-quant-pipeline = "tw_quant_signal.pipeline:main"
+tw-quant-backfill = "tw_quant_signal.backfill:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

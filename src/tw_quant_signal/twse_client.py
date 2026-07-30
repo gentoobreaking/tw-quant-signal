@@ -1,0 +1,189 @@
+import os
+import re
+import time
+from datetime import date, datetime, timedelta
+from typing import Optional
+
+import httpx
+
+TWSE_OPENAPI = os.getenv("TWSE_BASE_URL", "https://openapi.twse.com.tw/v1")
+TWSE_RWD = "https://www.twse.com.tw/rwd/zh"
+_ROC_EPOCH = 1911
+
+WATCH_STOCKS = ["2330"]
+
+
+def _roc_to_ad(roc_date: str) -> str:
+    year = int(roc_date[:3]) + _ROC_EPOCH
+    return f"{year}-{roc_date[3:5]}-{roc_date[5:7]}"
+
+
+def _safe_float(v) -> Optional[float]:
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (ValueError, TypeError):
+        return None
+
+
+def _safe_int(v) -> Optional[int]:
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (ValueError, TypeError):
+        return None
+
+
+def fetch_daily_prices_all() -> list[dict]:
+    url = f"{TWSE_OPENAPI}/exchangeReport/STOCK_DAY_ALL"
+    with httpx.Client(timeout=60) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+        rows = resp.json()
+    results = []
+    for r in rows:
+        code = r.get("Code", "")
+        date_str = r.get("Date", "")
+        if not code or not date_str:
+            continue
+        try:
+            trade_date = _roc_to_ad(date_str)
+        except (ValueError, IndexError):
+            continue
+        results.append({
+            "stock_id": code,
+            "trade_date": trade_date,
+            "open": _safe_float(r.get("OpeningPrice")),
+            "high": _safe_float(r.get("HighestPrice")),
+            "low": _safe_float(r.get("LowestPrice")),
+            "close": _safe_float(r.get("ClosingPrice")),
+            "volume": _safe_int(r.get("TradeVolume")),
+            "amount": _safe_float(r.get("TradeValue")),
+        })
+    return results
+
+
+def fetch_watch_stocks_prices() -> list[dict]:
+    all_data = fetch_daily_prices_all()
+    watch_set = set(WATCH_STOCKS)
+    return [r for r in all_data if r["stock_id"] in watch_set]
+
+
+def fetch_market_index() -> Optional[dict]:
+    url = f"{TWSE_OPENAPI}/exchangeReport/MI_INDEX"
+    with httpx.Client(timeout=30) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+        data = resp.json()
+
+    if not isinstance(data, list):
+        return None
+
+    INDEX_NAME = "發行量加權股價指數"
+    row = None
+    for r in data:
+        if r.get("指數") == INDEX_NAME:
+            row = r
+            break
+    if not row:
+        row = data[0] if data else None
+    if not row:
+        return None
+
+    date_roc = row.get("日期", "")
+    trade_date = _roc_to_ad(date_roc) if date_roc and len(date_roc) == 7 else date.today().isoformat()
+
+    close = _safe_float(row.get("收盤指數", "").replace(",", ""))
+    change_pct_str = row.get("漲跌百分比", "0").strip()
+    change_pct = _safe_float(change_pct_str) if change_pct_str != "-" else None
+
+    return {
+        "trade_date": trade_date,
+        "close": close,
+        "change_pct": change_pct,
+    }
+
+
+def fetch_institutional_flows(trade_date: Optional[str] = None) -> list[dict]:
+    raw = trade_date or date.today().isoformat()
+    _date = raw.replace("-", "")
+    url = f"{TWSE_RWD}/fund/T86?date={_date}&selectType=ALLBUT0999"
+    with httpx.Client(timeout=60) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+        payload = resp.json()
+    if payload.get("stat") != "OK":
+        return []
+    raw_date = payload.get("date", "")
+    ad_date = (
+        f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}"
+        if raw_date and len(raw_date) == 8
+        else (trade_date or date.today().isoformat())
+    )
+    results = []
+    for row in payload.get("data", []):
+        if not row or len(row) < 19:
+            continue
+        code = row[0].strip()
+        if not code:
+            continue
+        results.append({
+            "stock_id": code,
+            "trade_date": ad_date,
+            "market": "TSE",
+            "foreign_investors_net": _safe_int(row[4].replace(",", "")),
+            "sity_investors_net": _safe_int(row[10].replace(",", "")),
+            "dealer_net": _safe_int(row[11].replace(",", "")),
+            "dealer_proprietary_net": _safe_int(row[14].replace(",", "")),
+            "dealer_hedge_net": _safe_int(row[17].replace(",", "")),
+            "total_net": _safe_int(row[18].replace(",", "")),
+        })
+    return results
+
+
+def fetch_historical_daily_prices(stock_id: str, start_date: str, end_date: str) -> list[dict]:
+    """Fetch per-stock historical daily prices from TWSE RWD API.
+
+    Uses: https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY
+    Note: date format in URL is ROC calendar (e.g., 1150101 for 2026-01-01)
+    """
+    results = []
+    start = date.fromisoformat(start_date)
+    end = date.fromisoformat(end_date)
+    cursor = start.replace(day=1)
+    while cursor <= end:
+        roc_year = cursor.year - _ROC_EPOCH
+        month_str = f"{cursor.month:02d}"
+        url = f"https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date={roc_year}{month_str}01&stockNo={stock_id}&response=json"
+        with httpx.Client(timeout=30) as client:
+            try:
+                resp = client.get(url)
+                resp.raise_for_status()
+                payload = resp.json()
+            except Exception:
+                break
+        if payload.get("stat") != "OK":
+            break
+        for row in payload.get("data", []):
+            if len(row) < 8:
+                continue
+            roc_date = row[0].replace("/", "")
+            ad_date = _roc_to_ad(roc_date)
+            if ad_date < start_date or ad_date > end_date:
+                continue
+            results.append({
+                "stock_id": stock_id,
+                "trade_date": ad_date,
+                "volume": _safe_int(row[1].replace(",", "")),
+                "amount": _safe_float(row[2].replace(",", "")),
+                "open": _safe_float(row[3]),
+                "high": _safe_float(row[4]),
+                "low": _safe_float(row[5]),
+                "close": _safe_float(row[6]),
+            })
+        next_month = cursor.month + 1
+        cursor = cursor.replace(year=cursor.year + next_month // 12, month=(next_month - 1) % 12 + 1)
+        time.sleep(0.3)
+    return results
