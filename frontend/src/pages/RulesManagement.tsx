@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import type { Rule } from '../types'
@@ -156,23 +156,22 @@ export default function RulesManagement() {
     setTimeout(() => setToast(null), 2500)
   }, [])
 
-  const { isLoading: rulesLoading } = useQuery({
+  const { data: rulesData, isLoading: rulesLoading } = useQuery({
     queryKey: ['rules'],
-    queryFn: async () => {
-      const data = await api.rules()
-      setRules(data)
-      return data
-    },
+    queryFn: () => api.rules(),
+    staleTime: 0,
   })
 
-  const { isLoading: configLoading } = useQuery({
+  const { data: configData, isLoading: configLoading } = useQuery({
     queryKey: ['config'],
-    queryFn: async () => {
-      const data = await api.config()
-      setConfig(data)
-      return data
-    },
+    queryFn: () => api.config(),
+    staleTime: 0,
   })
+
+  useEffect(() => { if (rulesData) setRules(rulesData) }, [rulesData])
+  useEffect(() => { if (configData) setConfig(configData) }, [configData])
+
+  const rulesForDisplay = rules.length > 0 ? rules : (rulesData || [])
 
   const saveRulesMut = useMutation({
     mutationFn: (updated: Rule[]) => api.updateRules(updated),
@@ -192,7 +191,7 @@ export default function RulesManagement() {
     onError: () => showToast('儲存失敗', 'error'),
   })
 
-  const filtered = rules.filter(r => r.type === tab || (tab === 'all' ? true : false))
+  const filtered = rulesForDisplay.filter(r => r.type === tab || (tab === 'all' ? true : false))
 
   const updateRule = (index: number, updated: Rule) => {
     const copy = [...rules]
@@ -233,7 +232,7 @@ export default function RulesManagement() {
       {/* Rules section */}
       <div className="card">
         <div className="flex-between mb-8">
-          <h2>📜 規則列表 (共 {rules.length} 條)</h2>
+          <h2>📜 規則列表 (共 {rulesForDisplay.length} 條)</h2>
           <button
             className="btn btn-primary btn-sm"
             onClick={() => saveRulesMut.mutate(rules)}
