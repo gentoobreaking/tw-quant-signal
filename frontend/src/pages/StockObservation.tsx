@@ -135,16 +135,41 @@ export default function StockObservation() {
 
   return (
     <div>
-      <div className="stock-tabs">
-        {(stocks || []).map(s => (
-          <div
-            key={s.id}
-            className={`stock-tab ${selected === s.id ? 'active' : ''}`}
-            onClick={() => setSelected(s.id)}
-          >
-            {s.id} {s.name}
-          </div>
-        ))}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+        {(stocks || []).map(s => {
+          const isActive = selected === s.id
+          return (
+            <div
+              key={s.id}
+              onClick={() => setSelected(s.id)}
+              style={{
+                background: isActive ? 'var(--blue)' : 'var(--bg-card)',
+                border: `1px solid ${isActive ? 'var(--blue)' : 'var(--border)'}`,
+                borderRadius: 8, padding: '10px 16px', cursor: 'pointer',
+                minWidth: 140, transition: 'all .15s',
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 600, display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: isActive ? '#fff' : 'var(--text)' }}>{s.id}</span>
+                <span style={{ color: isActive ? '#fff' : 'var(--text-dim)', fontSize: 11 }}>{s.name}</span>
+              </div>
+              <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4, color: isActive ? '#fff' : 'var(--text)' }}>
+                {s.close?.toFixed(1) ?? '-'}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 11 }}>
+                <span style={{ color: s.change_pct != null && s.change_pct >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                  {s.change_pct != null ? `${s.change_pct >= 0 ? '+' : ''}${s.change_pct.toFixed(2)}%` : '-'}
+                </span>
+                <span style={{ color: isActive ? '#fff' : 'var(--text-dim)' }}>
+                  {s.health_score != null ? `${s.health_score.toFixed(0)}分` : '-'}
+                </span>
+                {s.risk_level && (
+                  <span className={`risk-badge ${s.risk_level}`}>{s.risk_score}</span>
+                )}
+              </div>
+            </div>
+          )
+        })}
       </div>
       {selected && <StockDetailView stockId={selected} />}
     </div>
