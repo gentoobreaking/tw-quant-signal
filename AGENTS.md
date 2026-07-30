@@ -68,6 +68,14 @@
 - [x] Telegram 風險監控推播
 - [x] 日報風險監控章節 (report.md)
 
+### Phase 7 — 儀表板與規則管理 (T009) ✅
+- [x] FastAPI 後端 API (`src/tw_quant_signal/api/app.py`)
+- [x] React + Vite + TypeScript 前端 (`frontend/`)
+- [x] 頁面 1：台股訊號觀察（K線圖 / 四燈號 / 風險 / 規則觸發 / 法人 / 財報）
+- [x] 頁面 2：規則與比重管理（YAML 編輯 / config.json 編輯 / 按類型分類）
+- [x] 圖表：lightweight-charts K線 + MA5/20/60 均線
+- [x] Vite dev proxy `/api` → FastAPI `:8000`
+
 ### 待設定
 - [ ] 設定 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` 環境變數啟用 Telegram 推播
 - [ ] 或設定 `DISCORD_WEBHOOK_URL` 啟用 Discord

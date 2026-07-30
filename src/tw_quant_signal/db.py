@@ -339,6 +339,27 @@ class SignalDB:
                 ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_health_scores(self, trade_date: str, stock_id: str = None) -> list[dict]:
+        with self.connect() as conn:
+            cols = [
+                "stock_id", "fundamental_score", "fundamental_light",
+                "institutional_score", "institutional_light",
+                "technical_score", "technical_light",
+                "valuation_score", "valuation_light",
+                "total_score", "total_light",
+            ]
+            if stock_id:
+                rows = conn.execute(
+                    f"SELECT {','.join(cols)} FROM health_scores WHERE trade_date=? AND stock_id=?",
+                    [trade_date, stock_id],
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    f"SELECT {','.join(cols)} FROM health_scores WHERE trade_date=?",
+                    [trade_date],
+                ).fetchall()
+        return [dict(zip(cols, r)) for r in rows]
+
     def upsert_health_scores(self, rows: list[dict]):
         import json
         if not rows:
