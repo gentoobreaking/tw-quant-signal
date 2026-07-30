@@ -39,8 +39,17 @@
 - [x] 每日自動產出訊號 + 記錄
 - [x] 可透過 YAML 設定檔動態調整規則，不需改程式碼
 
-### Phase 4 — 通知 & 串接 (T004)
-- [x] Telegram 規則引擎報告 (`send_rules_report` via `build_rules_report`)
+### Phase 4 — 回測框架 (T004) ✅
+- [x] `backtest.py` 完整回測引擎 (1106 日, 30 條規則, 3 種 forward)
+- [x] T-1 資料避免未來函數（`WHERE trade_date<=as_of`）
+- [x] IS/OOS 切分：樣本內 2022–2024 (727 日) / 樣本外 2025–2026 (379 日)
+- [x] 三種市場狀態分布：多頭 49.5% / 空頭 19.0% / 盤整 31.4%
+- [x] CostModel：證交稅 0.3% + 手續費 0.1425% × 0.6 折，參數可調
+- [x] 每條規則輸出：勝率、平均報酬、盈虧比、MaxDD、連續虧損
+- [x] 記錄規則評估總數 4,819 次（多重檢定可追溯）
+
+### Phase 5 — 通知 & 串接 (T005)
+- [ ] Telegram 規則引擎報告 (`send_rules_report`)
 - [ ] Token 設定 + 實際測試 Telegram 推播
 - [ ] 每條規則歷史統計報告
 - [ ] Recommended action text
