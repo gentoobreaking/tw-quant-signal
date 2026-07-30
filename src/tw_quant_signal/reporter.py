@@ -80,15 +80,13 @@ def generate_csv_report(db: SignalDB, run_date: str | None = None) -> str:
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
         writer.writerow(["stock_id", "trade_date", "signal", "total_score",
-                         "d1_score", "d1_signal", "d2_score", "d2_signal",
-                         "d3_score", "d3_signal", "d4_score", "d4_signal"])
+                         "triggered_rules", "triggered_count"])
         with db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM signals WHERE trade_date=?", [run_date]
+                "SELECT stock_id, trade_date, signal, total_score, triggered_rules, triggered_count "
+                "FROM rule_signals WHERE trade_date=?", [run_date]
             ).fetchall()
         for r in rows:
-            writer.writerow([r[1], r[0], r[11], r[10],
-                             r[2], r[3], r[4], r[5],
-                             r[6], r[7], r[8], r[9]])
+            writer.writerow(r)
 
     return str(path)

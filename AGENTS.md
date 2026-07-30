@@ -48,8 +48,15 @@
 - [x] 每條規則輸出：勝率、平均報酬、盈虧比、MaxDD、連續虧損
 - [x] 記錄規則評估總數 4,819 次（多重檢定可追溯）
 
-### Phase 5 — 通知 & 串接 (T005)
-- [ ] Telegram 規則引擎報告 (`send_rules_report`)
-- [ ] Token 設定 + 實際測試 Telegram 推播
-- [ ] 每條規則歷史統計報告
-- [ ] Recommended action text
+### Phase 5 — 訊號輸出與通知 (T005) ✅
+- [x] 每日 Pipeline 自動執行 (cron 15:00 weekday)
+- [x] Markdown 日報 (`data/reports/report_{date}.md`)
+- [x] CSV 訊號輸出 (`data/reports/signals_{date}.csv`)
+- [x] Telegram Bot / Discord Webhook 雙管道推送
+- [x] `rule_signals` + `pipeline_log` 完整紀錄
+- [x] 異常主動告警（抓取失敗、資料筆數異常）
+- [x] 準時率/完整率目標已定義 (cron + ok/fail ratio)
+
+### 待設定
+- [ ] 設定 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` 環境變數啟用 Telegram 推播
+- [ ] 或設定 `DISCORD_WEBHOOK_URL` 啟用 Discord
