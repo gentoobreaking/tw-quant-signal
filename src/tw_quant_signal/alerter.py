@@ -87,9 +87,33 @@ def _bb_signal(close, upper, lower):
     return ""
 
 
-def build_daily_report(status: dict, report_data: Optional[dict] = None) -> str:
+MARKET_STATE_ICONS = {"bull": "📈多頭", "bear": "📉空頭", "range": "➡️盤整", "unknown": "❓未知"}
+
+_MARKET_STATE = None
+
+
+def _get_market_state_display(db=None) -> str:
+    if _MARKET_STATE is not None:
+        return _MARKET_STATE
+    if db is None:
+        return "❓"
+    from tw_quant_signal.market_state import detect_market_state, LABELS
+    try:
+        ms = detect_market_state(db)
+        return LABELS.get(ms["state"], "❓")
+    except Exception:
+        return "❓"
+
+
+def build_daily_report(status: dict, report_data: Optional[dict] = None, market_state: Optional[str] = None) -> str:
     run_date = date.today()
-    lines = [f"📊 *台股訊號 — {run_date.month:02d}/{run_date.day:02d}*", ""]
+    lines = [f"📊 *台股訊號 — {run_date.month:02d}/{run_date.day:02d}*"]
+
+    if market_state:
+        icon = MARKET_STATE_ICONS.get(market_state, "❓")
+        lines[0] += f"  {icon}"
+
+    lines.append("")
 
     idx = (report_data or {}).get("index")
     if idx:
@@ -207,9 +231,13 @@ def send_rules_report(rule_results: list[dict]) -> bool:
     return send_alert(report)
 
 
-def build_health_check_report(health_scores: list[dict]) -> str:
+def build_health_check_report(health_scores: list[dict], market_state: Optional[str] = None) -> str:
     run_date = date.today()
-    lines = [f"🩺 *四燈號健診 — {run_date.month:02d}/{run_date.day:02d}*", ""]
+    lines = [f"🩺 *四燈號健診 — {run_date.month:02d}/{run_date.day:02d}*"]
+    if market_state:
+        icon = MARKET_STATE_ICONS.get(market_state, "❓")
+        lines[0] += f"  {icon}"
+    lines.append("")
     ASPECT = {
         "fundamental": ("📈基本面", 25),
         "institutional": ("👁籌碼面", 25),
@@ -228,6 +256,6 @@ def build_health_check_report(health_scores: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def send_health_check_report(health_scores: list[dict]) -> bool:
-    report = build_health_check_report(health_scores)
+def send_health_check_report(health_scores: list[dict], market_state: Optional[str] = None) -> bool:
+    report = build_health_check_report(health_scores, market_state)
     return send_alert(report)

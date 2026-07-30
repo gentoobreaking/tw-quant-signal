@@ -67,24 +67,8 @@ def main():
         icon = "✓" if v == "ok" else ("–" if v == "skip" else "✗")
         print(f"  [{icon}] {k}: {v}")
 
-    # Health check scoring
-    try:
-        health_scores = compute_health_check(db, run_date)
-        if health_scores:
-            db.upsert_health_scores(health_scores)
-            send_health_check_report(health_scores)
-            print(f"  → {len(health_scores)} 筆四燈號健診評分")
-            status["health_check"] = "ok"
-        else:
-            print("  ⚠ 無健診評分產出")
-            status["health_check"] = "skip"
-    except Exception as e:
-        print(f"  ✗ 健診評分失敗: {e}")
-        status["health_check"] = "fail"
-
-    all_ok = all(v == "ok" for v in status.values())
-
-    # Market state detection
+    # Market state detection (before health check so state is available)
+    mstate = None
     try:
         mstate = detect_market_state(db, run_date)
         state_label = STATE_LABELS.get(mstate["state"], mstate["state"])
@@ -95,6 +79,23 @@ def main():
     except Exception as e:
         print(f"  ✗ 市場狀態偵測失敗: {e}")
         status["market_state"] = "fail"
+
+    # Health check scoring
+    try:
+        health_scores = compute_health_check(db, run_date)
+        if health_scores:
+            db.upsert_health_scores(health_scores)
+            send_health_check_report(health_scores, mstate["state"] if mstate else None)
+            print(f"  → {len(health_scores)} 筆四燈號健診評分")
+            status["health_check"] = "ok"
+        else:
+            print("  ⚠ 無健診評分產出")
+            status["health_check"] = "skip"
+    except Exception as e:
+        print(f"  ✗ 健診評分失敗: {e}")
+        status["health_check"] = "fail"
+
+    all_ok = all(v == "ok" for v in status.values())
 
     # Anomaly detection
     anomalies = []
@@ -141,7 +142,7 @@ def main():
         send_alert(msg)
 
     report_data = _gather_report_data(db)
-    send_alert(build_daily_report(status, report_data))
+    send_alert(build_daily_report(status, report_data, mstate["state"] if mstate else None))
 
     print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 管線完成")
     return 0 if all_ok else 1
