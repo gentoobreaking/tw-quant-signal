@@ -1,5 +1,8 @@
 import sys
 from datetime import date, datetime
+from pathlib import Path
+
+from pathlib import Path
 
 from tw_quant_signal.db import SignalDB
 from tw_quant_signal.twse_client import WATCH_STOCKS
@@ -12,6 +15,7 @@ from tw_quant_signal.market_state import detect_market_state, LABELS as STATE_LA
 from tw_quant_signal.risk_manager import compute_risk_metrics, RISK_LEVELS
 from tw_quant_signal.indicators import compute_weekly_indicators, compute_monthly_indicators
 from tw_quant_signal.multi_timeframe import compute_multi_timeframe
+from tw_quant_signal.structural_change import compute_all_drift, store_drift_results, generate_structural_change_report
 
 
 def _gather_report_data(db):
@@ -238,6 +242,37 @@ def main():
 
     if risk_metrics:
         send_risk_report(risk_metrics)
+
+    # Structural change detection
+    try:
+        drift_result = compute_all_drift(db)
+        store_drift_results(db, drift_result)
+        total_alerts = sum(drift_result["alert_summary"].values())
+        if total_alerts > 0:
+            icon_map = {"critical": "🔴", "warning": "🟠", "watch": "🟡"}
+            alert_parts = []
+            for level in ("critical", "warning", "watch"):
+                cnt = drift_result["alert_summary"].get(level, 0)
+                if cnt > 0:
+                    alert_parts.append(f"{icon_map[level]} {level}={cnt}")
+            print(f"  → 結構變化偵測完成: {total_alerts} 項異常 ({', '.join(alert_parts)})")
+            # 衰退通知 — 僅 critical/warning 等級
+            serious = drift_result["alert_summary"].get("critical", 0) + drift_result["alert_summary"].get("warning", 0)
+            if serious > 0:
+                drift_report = generate_structural_change_report(db)
+                if drift_report:
+                    report_path = Path("data/reports")
+                    report_path.mkdir(parents=True, exist_ok=True)
+                    (report_path / f"drift_{run_date}.md").write_text(drift_report)
+                send_alert(f"⚠️ 結構變化偵測: {serious} 項中/高異常，見 data/reports/drift_{run_date}.md")
+        else:
+            print(f"  → 結構變化偵測完成: 無異常")
+        status["structural_drift"] = "ok"
+    except Exception as e:
+        print(f"  ✗ 結構變化偵測失敗: {e}")
+        import traceback
+        traceback.print_exc()
+        status["structural_drift"] = "fail"
 
     print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 管線完成")
     return 0 if all_ok else 1

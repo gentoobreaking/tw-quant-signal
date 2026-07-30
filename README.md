@@ -18,7 +18,7 @@
            │ SQLite
 ┌──────────▼──────────────────────────┐
 │         Data Layer (SignalDB)        │
-│  17 張表 · 股價/指標/籌碼/財務/健診 │
+│  18 張表 · 股價/指標/籌碼/財務/健診/衰退監控 │
 └─────────────────────────────────────┘
 ```
 
@@ -33,7 +33,7 @@ src/tw_quant_signal/
 ├── backfill.py         # 歷史回補腳本
 ├── backtest.py         # 規則回測框架
 ├── config.py           # 設定載入 (config.json + 環境變數)
-├── db.py               # 資料庫層 (17 張表, CRUD 方法)
+├── db.py               # 資料庫層 (18 張表, CRUD 方法)
 ├── features.py         # 特徵工程 (技術/籌碼/估值 50+ 欄位)
 ├── health_check.py     # 四燈號健診評分引擎 (日/週/月三級別)
 ├── indicators.py       # 技術指標計算 (MA/RSI/BB/成交量/週線/月線)
@@ -44,6 +44,7 @@ src/tw_quant_signal/
 ├── reporter.py         # Markdown/CSV 報告產生
 ├── risk_manager.py     # 風險指標計算 (波動率/ATR/回撤/停損)
 ├── rules.py            # 規則引擎 (evaluate + aggregate + 加權)
+├── structural_change.py # 結構變化偵測（規則衰退 / 特徵漂移 / 勝率衰退）
 └── twse_client.py      # TWSE 資料源客戶端 (yfinance + FinMind)
 
 configs/
@@ -90,6 +91,14 @@ frontend/
 - **三級別健診** — 日線·週線·月線各自獨立評分
 - **多框架共識** — 56 種日+週組合映射 (強多→強空)，含 `conflicting` 訊號分類
 - **API 完整暴露** — `/api/health`, `/api/weekly-health`, `/api/monthly-health`, `/api/multi-timeframe`
+
+### ✅ Phase 3 — 結構變化偵測
+- **規則觸發頻率漂移** — 比較近 20 日 vs 歷史觸發率，偵測規則是否過度活躍/沈默
+- **規則滾動勝率衰退** — 以次日漲跌驗證訊號方向正確性，30% 以上衰退告警
+- **特徵分布偏移** — 11 項數值特徵（RSI/PE/PB/成交量等）均值變化監控
+- **健診評分系統性偏移** — 整體評分分布是否持續上升或下滑
+- **三級警報** — watch(偏移30%) / warning(50%) / critical(70%) + 自動通報
+- **不自動停用** — 衰退規則標記 `drift_status`，由人決定是否調整
 
 ### 📋 待實作
 | Task | 說明 |
@@ -193,6 +202,8 @@ docker compose --profile scheduler up   # 額外啟動定時排程容器
 | `GET /api/weekly-health` | 週線健診 |
 | `GET /api/monthly-health` | 月線健診 |
 | `GET /api/multi-timeframe` | 多時間框架共識 |
+| `GET /api/structural-drift` | 結構變化偵測結果 (可選 `?today_only=false`) |
+| `GET /api/drift-report` | 結構變化 Markdown 報告 |
 | `GET /api/health-check-config` | 健診評分配置 |
 | `PUT /api/health-check-config` | 更新健診配置 |
 | `GET /api/rules` | 規則列表 |
@@ -202,7 +213,7 @@ docker compose --profile scheduler up   # 額外啟動定時排程容器
 
 ## 資料庫 Schema (SignalDB)
 
-17 張表涵蓋完整管線：
+18 張表涵蓋完整管線：
 
 | 表 | 用途 |
 |----|------|
@@ -222,6 +233,7 @@ docker compose --profile scheduler up   # 額外啟動定時排程容器
 | `weekly_health_scores` | 週線健診評分 |
 | `monthly_health_scores` | 月線健診評分 |
 | `multi_timeframe_consensus` | 多時間框架共識 |
+| `structural_drift` | 結構變化偵測（規則衰退/特徵偏移） |
 
 ## 知識庫 / 參考
 

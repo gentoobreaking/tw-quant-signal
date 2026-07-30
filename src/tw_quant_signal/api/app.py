@@ -294,6 +294,26 @@ def monthly_health():
     return {"data": rows}
 
 
+@app.get("/api/structural-drift")
+def structural_drift(today_only: bool = True):
+    db = _get_db()
+    if today_only:
+        rows = db.get_structural_drift(trade_date=date.today().isoformat())
+    else:
+        rows = db.get_structural_drift()
+    return {"data": rows}
+
+
+@app.get("/api/drift-report")
+def drift_report():
+    from tw_quant_signal.structural_change import generate_structural_change_report
+    db = _get_db()
+    report = generate_structural_change_report(db)
+    if report:
+        return {"data": {"report": report}}
+    return {"data": {"report": "無足夠資料產生結構變化偵測報告"}}
+
+
 @app.get("/api/multi-timeframe")
 def multi_timeframe():
     db = _get_db()

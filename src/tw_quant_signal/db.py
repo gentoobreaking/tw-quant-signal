@@ -234,6 +234,21 @@ def _init_schema(conn: sqlite3.Connection):
             volume_ma6     REAL,
             PRIMARY KEY (stock_id, trade_date)
         );
+
+        CREATE TABLE IF NOT EXISTS structural_drift (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_date      TEXT NOT NULL,
+            drift_type      TEXT NOT NULL,
+            rule_id         TEXT,
+            feature_name    TEXT,
+            reference_value REAL,
+            recent_value    REAL,
+            drift_score     REAL,
+            drift_status    TEXT,
+            direction       TEXT,
+            details         TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_structural_drift ON structural_drift(trade_date, drift_type);
     """)
 
 
@@ -730,6 +745,29 @@ class SignalDB:
                 [stock_id, limit],
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def get_structural_drift(self, trade_date: str = None, drift_type: str = None) -> list[dict]:
+        with self.connect() as conn:
+            import json
+            if trade_date and drift_type:
+                rows = conn.execute(
+                    "SELECT * FROM structural_drift WHERE trade_date=? AND drift_type=? ORDER BY drift_score DESC",
+                    [trade_date, drift_type],
+                ).fetchall()
+            elif trade_date:
+                rows = conn.execute(
+                    "SELECT * FROM structural_drift WHERE trade_date=? ORDER BY drift_score DESC",
+                    [trade_date],
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM structural_drift ORDER BY trade_date DESC, drift_score DESC"
+                ).fetchall()
+        result = [dict(r) for r in rows]
+        for d in result:
+            if isinstance(d.get("details"), str):
+                d["details"] = json.loads(d["details"])
+        return result
 
     def get_institutional_flows(self, stock_id: str, limit: int = 20) -> list[dict]:
         with self.connect() as conn:
