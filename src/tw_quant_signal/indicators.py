@@ -57,6 +57,57 @@ def _rsi(series: pd.Series, period: int = 14) -> pd.Series:
     return rsi
 
 
+def compute_weekly_indicators(prices: list[dict], stock_id: str = "2330") -> list[dict]:
+    """Aggregate daily prices to weekly and compute weekly indicators.
+
+    Weekly windows: MA5 (5 weeks), MA20 (20 weeks), MA60 (60 weeks),
+    BB(20 weeks), RSI(14 weeks).
+    """
+    if not prices:
+        return []
+    df = pd.DataFrame(prices)
+    df = df.sort_values("trade_date").reset_index(drop=True)
+    df["trade_date"] = pd.to_datetime(df["trade_date"])
+
+    df["week"] = df["trade_date"].dt.isocalendar().year.astype(str) + "-W" + df["trade_date"].dt.isocalendar().week.astype(str).str.zfill(2)
+
+    weekly = df.groupby("week").agg({
+        "close": "last",
+        "high": "max",
+        "low": "min",
+        "volume": "sum",
+        "trade_date": "last",
+    }).reset_index(drop=True)
+    weekly = weekly.sort_values("trade_date").reset_index(drop=True)
+
+    close = weekly["close"].astype(float)
+    volume = weekly["volume"].astype(float)
+
+    weekly["ma5"] = _ma(close, 5)
+    weekly["ma20"] = _ma(close, 20)
+    weekly["ma60"] = _ma(close, 60)
+
+    bb = _bollinger(close, 20)
+    weekly["bb_upper"] = bb[0]
+    weekly["bb_middle"] = bb[1]
+    weekly["bb_lower"] = bb[2]
+
+    weekly["rsi14"] = _rsi(close, 14)
+
+    weekly["volume_ma5"] = _ma(volume, 5)
+    weekly["volume_ma20"] = _ma(volume, 20)
+
+    weekly["stock_id"] = stock_id
+    weekly["trade_date"] = weekly["trade_date"].astype(str)
+    weekly["close"] = weekly["close"].astype(float)
+
+    cols = ["stock_id", "trade_date", "close",
+            "ma5", "ma20", "ma60",
+            "bb_upper", "bb_middle", "bb_lower", "rsi14",
+            "volume_ma5", "volume_ma20"]
+    return weekly[cols].to_dict(orient="records")
+
+
 def ma_alignment(ma5: float, ma20: float, ma60: float) -> str:
     if ma5 is None or ma20 is None or ma60 is None:
         return "unknown"

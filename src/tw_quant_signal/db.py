@@ -156,6 +156,51 @@ def _init_schema(conn: sqlite3.Connection):
             details             TEXT,
             PRIMARY KEY (trade_date, stock_id)
         );
+
+        CREATE TABLE IF NOT EXISTS weekly_indicators (
+            stock_id       TEXT NOT NULL,
+            trade_date     TEXT NOT NULL,
+            close          REAL,
+            ma5            REAL,
+            ma20           REAL,
+            ma60           REAL,
+            bb_upper       REAL,
+            bb_middle      REAL,
+            bb_lower       REAL,
+            rsi14          REAL,
+            volume_ma5     REAL,
+            volume_ma20    REAL,
+            PRIMARY KEY (stock_id, trade_date)
+        );
+
+        CREATE TABLE IF NOT EXISTS weekly_health_scores (
+            trade_date          TEXT NOT NULL,
+            stock_id            TEXT NOT NULL,
+            fundamental_score   REAL,
+            fundamental_light   TEXT,
+            institutional_score REAL,
+            institutional_light TEXT,
+            technical_score     REAL,
+            technical_light     TEXT,
+            valuation_score     REAL,
+            valuation_light     TEXT,
+            total_score         REAL,
+            total_light         TEXT,
+            details             TEXT,
+            PRIMARY KEY (trade_date, stock_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS multi_timeframe_consensus (
+            trade_date       TEXT NOT NULL,
+            stock_id         TEXT NOT NULL,
+            daily_light      TEXT,
+            weekly_light     TEXT,
+            consensus        TEXT NOT NULL,
+            consensus_label  TEXT NOT NULL,
+            signal_type      TEXT NOT NULL,
+            details          TEXT,
+            PRIMARY KEY (trade_date, stock_id)
+        );
     """)
 
 
@@ -294,6 +339,17 @@ class SignalDB:
             ).fetchone()
             return row[0] if row else None
 
+    def get_latest_margin_raw(self, stock_id: str) -> Optional[dict]:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT margin_balance, short_balance, margin_ratio FROM margin_data "
+                "WHERE stock_id=? ORDER BY trade_date DESC LIMIT 1",
+                [stock_id],
+            ).fetchone()
+            if not row:
+                return None
+            return {"margin_balance": row[0], "short_balance": row[1], "margin_ratio": row[2]}
+
     def upsert_risk_metrics(self, rows: list[dict]):
         import json
         if not rows:
@@ -342,12 +398,13 @@ class SignalDB:
 
     def get_health_scores(self, trade_date: str, stock_id: str = None) -> list[dict]:
         with self.connect() as conn:
+            import json
             cols = [
                 "stock_id", "fundamental_score", "fundamental_light",
                 "institutional_score", "institutional_light",
                 "technical_score", "technical_light",
                 "valuation_score", "valuation_light",
-                "total_score", "total_light",
+                "total_score", "total_light", "details",
             ]
             if stock_id:
                 rows = conn.execute(
@@ -359,7 +416,13 @@ class SignalDB:
                     f"SELECT {','.join(cols)} FROM health_scores WHERE trade_date=?",
                     [trade_date],
                 ).fetchall()
-        return [dict(zip(cols, r)) for r in rows]
+        result = []
+        for r in rows:
+            d = dict(zip(cols, r))
+            if isinstance(d.get("details"), str):
+                d["details"] = json.loads(d["details"])
+            result.append(d)
+        return result
 
     def upsert_health_scores(self, rows: list[dict]):
         import json
@@ -422,6 +485,129 @@ class SignalDB:
                      r.get("bb_lower"), r.get("rsi14"), r.get("volume_ma5"),
                      r.get("volume_ma20")],
                 )
+
+    def upsert_weekly_indicators(self, rows: list[dict]):
+        with self.connect() as conn:
+            for r in rows:
+                conn.execute(
+                    """INSERT OR REPLACE INTO weekly_indicators
+                       (stock_id, trade_date, close, ma5, ma20, ma60, bb_upper, bb_middle, bb_lower, rsi14, volume_ma5, volume_ma20)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [r["stock_id"], r["trade_date"], r.get("close"),
+                     r.get("ma5"), r.get("ma20"),
+                     r.get("ma60"), r.get("bb_upper"), r.get("bb_middle"),
+                     r.get("bb_lower"), r.get("rsi14"), r.get("volume_ma5"),
+                     r.get("volume_ma20")],
+                )
+
+    def get_weekly_indicators(self, stock_id: str) -> Optional[dict]:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT ma5, ma20, ma60, rsi14, bb_upper, bb_middle, bb_lower, "
+                "volume_ma5, volume_ma20 FROM weekly_indicators "
+                "WHERE stock_id=? ORDER BY trade_date DESC LIMIT 1",
+                [stock_id],
+            ).fetchone()
+            if not row:
+                return None
+            keys = ["ma5", "ma20", "ma60", "rsi14", "bb_upper", "bb_middle", "bb_lower",
+                    "volume_ma5", "volume_ma20"]
+            return dict(zip(keys, row))
+
+    def upsert_weekly_health_scores(self, rows: list[dict]):
+        import json
+        if not rows:
+            return
+        with self.connect() as conn:
+            for r in rows:
+                conn.execute("DELETE FROM weekly_health_scores WHERE trade_date=? AND stock_id=?",
+                             [r["trade_date"], r["stock_id"]])
+                conn.execute(
+                    """INSERT INTO weekly_health_scores
+                    (trade_date, stock_id, fundamental_score, fundamental_light,
+                     institutional_score, institutional_light,
+                     technical_score, technical_light,
+                     valuation_score, valuation_light,
+                     total_score, total_light, details)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [
+                        r["trade_date"], r["stock_id"],
+                        r.get("fundamental_score"), r.get("fundamental_light"),
+                        r.get("institutional_score"), r.get("institutional_light"),
+                        r.get("technical_score"), r.get("technical_light"),
+                        r.get("valuation_score"), r.get("valuation_light"),
+                        r.get("total_score"), r.get("total_light"),
+                        json.dumps(r.get("details", {}), ensure_ascii=False),
+                    ],
+                )
+
+    def get_weekly_health_scores(self, trade_date: str, stock_id: str = None) -> list[dict]:
+        with self.connect() as conn:
+            import json
+            cols = [
+                "stock_id", "fundamental_score", "fundamental_light",
+                "institutional_score", "institutional_light",
+                "technical_score", "technical_light",
+                "valuation_score", "valuation_light",
+                "total_score", "total_light", "details",
+            ]
+            if stock_id:
+                rows = conn.execute(
+                    f"SELECT {','.join(cols)} FROM weekly_health_scores WHERE trade_date=? AND stock_id=?",
+                    [trade_date, stock_id],
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    f"SELECT {','.join(cols)} FROM weekly_health_scores WHERE trade_date=?",
+                    [trade_date],
+                ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(zip(cols, r))
+            if isinstance(d.get("details"), str):
+                d["details"] = json.loads(d["details"])
+            result.append(d)
+        return result
+
+    def upsert_multi_timeframe_consensus(self, rows: list[dict]):
+        import json
+        if not rows:
+            return
+        with self.connect() as conn:
+            for r in rows:
+                conn.execute("DELETE FROM multi_timeframe_consensus WHERE trade_date=? AND stock_id=?",
+                             [r["trade_date"], r["stock_id"]])
+                conn.execute(
+                    """INSERT INTO multi_timeframe_consensus
+                    (trade_date, stock_id, daily_light, weekly_light, consensus, consensus_label, signal_type, details)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [
+                        r["trade_date"], r["stock_id"],
+                        r.get("daily_light"), r.get("weekly_light"),
+                        r.get("consensus"), r.get("consensus_label"),
+                        r.get("signal_type"),
+                        json.dumps(r.get("details", {}), ensure_ascii=False),
+                    ],
+                )
+
+    def get_multi_timeframe_consensus(self, trade_date: str, stock_id: str = None) -> list[dict]:
+        with self.connect() as conn:
+            import json
+            if stock_id:
+                rows = conn.execute(
+                    "SELECT * FROM multi_timeframe_consensus WHERE trade_date=? AND stock_id=?",
+                    [trade_date, stock_id],
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM multi_timeframe_consensus WHERE trade_date=?",
+                    [trade_date],
+                ).fetchall()
+        result = [dict(r) for r in rows]
+        for d in result:
+            if isinstance(d.get("details"), str):
+                d["details"] = json.loads(d["details"])
+        return result
 
     def get_stock_prices(self, stock_id: str, limit: int = 365) -> list[dict]:
         with self.connect() as conn:

@@ -1,0 +1,198 @@
+aspect_weights:
+  fundamental: 25
+  institutional: 25
+  technical: 25
+  valuation: 25
+
+market_state_boost:
+  bull:
+    primary_aspect: fundamental
+    weight: 0.1
+  bear:
+    primary_aspect: valuation
+    weight: 0.1
+
+aspects:
+  fundamental:
+    label: 基本面
+    sub:
+      - key: eps_growth
+        name: EPS成長率
+        weight: 40
+        scoring: "近4季 vs 前4季：≥20%→100, ≥10%→70, ≥0%→40, <0%→0"
+        formula: "(近4季平均EPS - 前4季平均EPS) / 前4季平均EPS × 100%"
+        thresholds:
+          - min: 20
+            score: 100
+          - min: 10
+            score: 70
+          - min: 0
+            score: 40
+          - min: -9999
+            score: 0
+      - key: revenue_yoy
+        name: 營收成長率
+        weight: 30
+        scoring: "近季 vs 去年同期：≥15%→100, ≥5%→70, ≥0%→40, <0%→0"
+        formula: "(本期營收 - 去年同期營收) / 去年同期營收 × 100%"
+        thresholds:
+          - min: 15
+            score: 100
+          - min: 5
+            score: 70
+          - min: 0
+            score: 40
+          - min: -9999
+            score: 0
+      - key: gross_margin
+        name: 毛利率趨勢
+        weight: 30
+        scoring: "近季 vs 前季：上升→100, 持平→50, 下降→0"
+        formula: "本期毛利率 - 上期毛利率"
+        thresholds:
+          - min: 9999
+            score: 100
+          - min: -9999
+            score: 0
+
+  institutional:
+    label: 籌碼面
+    sub:
+      - key: foreign_ratio
+        name: 外資5日買超占比
+        weight: 40
+        scoring: "近5日淨買超/流通量：>10%→90, >5%→75, >0%→55, >-5%→40, ≤-5%→20"
+        formula: "∑(近5日外資買超) / (近20日均量 × 5) × 100%"
+        thresholds:
+          - min: 10
+            score: 90
+          - min: 5
+            score: 75
+          - min: 0
+            score: 55
+          - min: -5
+            score: 40
+          - min: -9999
+            score: 20
+      - key: sity_ratio
+        name: 投信5日買超占比
+        weight: 30
+        scoring: "近5日淨買超/流通量：>5%→90, >2%→75, >0%→55, >-2%→40, ≤-2%→20"
+        formula: "∑(近5日投信買超) / (近20日均量 × 5) × 100%"
+        thresholds:
+          - min: 5
+            score: 90
+          - min: 2
+            score: 75
+          - min: 0
+            score: 55
+          - min: -2
+            score: 40
+          - min: -9999
+            score: 20
+      - key: margin_ratio
+        name: 券資比
+        weight: 30
+        scoring: "融券/融資：<3%→80, <8%→65, <15%→50, <30%→35, ≥30%→20"
+        formula: "融券張數 / 融資張數 × 100%"
+        thresholds:
+          - min: -9999
+            score: 80
+          - min: 3
+            score: 65
+          - min: 8
+            score: 50
+          - min: 15
+            score: 35
+          - min: 30
+            score: 20
+
+  technical:
+    label: 技術面
+    sub:
+      - key: ma_alignment
+        name: 均線排列
+        weight: 40
+        scoring: "MA5>MA20>MA60→多頭85, 中性→50, 空頭→20"
+        formula: "MA5 vs MA20 vs MA60 比較結果"
+        thresholds:
+          - min: 9999
+            score: 85
+          - min: 0
+            score: 50
+          - min: -9999
+            score: 20
+      - key: rsi14
+        name: RSI指標
+        weight: 30
+        scoring: "RSI≤25→超賣90, ≤35→偏賣75, ≤45→45, ≤55→55, ≤65→65, ≤75→偏買35, >75→過熱15"
+        formula: "100 - 100 / (1 + 14日平均漲幅/14日平均跌幅)"
+        thresholds:
+          - min: -9999
+            score: 90
+          - min: 25
+            score: 75
+          - min: 35
+            score: 45
+          - min: 45
+            score: 55
+          - min: 55
+            score: 65
+          - min: 65
+            score: 35
+          - min: 75
+            score: 15
+      - key: bb_position
+        name: 布林通道
+        weight: 30
+        scoring: "低於下軌→85, 中軌與下軌間→40, 上軌與中軌間→60, 高於上軌→25"
+        formula: "收盤價 vs BB上軌/中軌/下軌 位置"
+        thresholds:
+          - min: 9999
+            score: 85
+          - min: 0
+            score: 40
+          - min: -9999
+            score: 60
+
+  valuation:
+    label: 估值面
+    sub:
+      - key: pe_river
+        name: 本益比河流
+        weight: 40
+        scoring: "PE 5年均值：偏低→80, 中性→50, 偏高→25"
+        formula: "目前PE vs 5年均值PE 比較"
+        thresholds:
+          - min: 9999
+            score: 80
+          - min: 0
+            score: 50
+          - min: -9999
+            score: 25
+      - key: pb_river
+        name: 股價淨值比河流
+        weight: 30
+        scoring: "PB 5年均值：偏低→80, 中性→50, 偏高→25"
+        formula: "目前PB vs 5年均值PB 比較"
+        thresholds:
+          - min: 9999
+            score: 80
+          - min: 0
+            score: 50
+          - min: -9999
+            score: 25
+      - key: dividend_yield
+        name: 殖利率
+        weight: 30
+        scoring: "DY≥5%→80, ≥3%→65, ≥2%→50, <2%→30"
+        formula: "近4季現金股利總和 / 目前股價 × 100%"
+        thresholds:
+          - min: 5
+            score: 80
+          - min: 3
+            score: 65
+          - min: 2
+            score: 50
+          - min: -9999
+            score: 30

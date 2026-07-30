@@ -229,6 +229,53 @@ def fetch_margin_data(trade_date: str = None) -> dict[str, dict]:
     return result
 
 
+def fetch_monthly_revenue(stock_id: str, year: int = None, month: int = None) -> Optional[dict]:
+    """Fetch monthly revenue from MOPS ajax_t05st10_ifrs.
+
+    Returns:
+      {"revenue": int (千元), "prev_year_revenue": int, "yoy_pct": float, "year": int, "month": int}
+    """
+    from bs4 import BeautifulSoup
+    today = date.today()
+    year = year or (today.year - 1911)  # ROC year
+    month = month or (today.month - 1) or 12
+    if month < 1 or month > 12:
+        month = today.month - 1 if today.month > 1 else 12
+    url = "https://mopsov.twse.com.tw/mops/web/ajax_t05st10_ifrs"
+    data = {
+        "step": "1", "firstin": "true", "off": "1",
+        "TYPEK": "sii", "year": str(year), "month": f"{month:02d}", "co_id": stock_id,
+    }
+    with httpx.Client(timeout=15) as client:
+        resp = client.post(url, data=data)
+        resp.encoding = "utf-8"
+        soup = BeautifulSoup(resp.text, "html.parser")
+    tables = soup.find_all("table")
+    if len(tables) < 4:
+        return None
+    rows = tables[3].find_all("tr")
+    if len(rows) < 5:
+        return None
+    def _get_val(row_idx):
+        vals = [c.get_text(strip=True).replace(",", "") for c in rows[row_idx].find_all(["td", "th"])]
+        return vals[-1] if vals else None  # value is always the last cell
+    try:
+        revenue = int(_get_val(1))
+        prev_revenue = int(_get_val(2))
+        yoy_pct = float(_get_val(4))
+    except (ValueError, TypeError, IndexError):
+        return None
+    if not revenue:
+        return None
+    return {
+        "revenue": revenue,
+        "prev_year_revenue": prev_revenue,
+        "yoy_pct": yoy_pct,
+        "year": year + 1911,
+        "month": month,
+    }
+
+
 def fetch_yf_financials(stock_id: str) -> Optional[dict]:
     """Fetch quarterly financials from yfinance.
 

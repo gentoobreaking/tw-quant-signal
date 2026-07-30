@@ -1,8 +1,10 @@
 import json
+import math
 from datetime import date, timedelta
 from typing import Optional
 
 import pandas as pd
+import yfinance as yf
 
 from tw_quant_signal.db import SignalDB
 from tw_quant_signal.twse_client import (
@@ -115,16 +117,102 @@ def _get_historical_eps(db: SignalDB, stock_id: str, lookback: int = 252) -> lis
     return eps_values
 
 
-def _compute_eps_yoy_growth(db: SignalDB, stock_id: str) -> Optional[float]:
-    eps_hist = _get_historical_eps(db, stock_id, lookback=365)
-    if len(eps_hist) < 60:
+def _get_yf_quarterly_snapshot(stock_id: str) -> Optional[dict]:
+    """Fetch quarterly financials from yfinance and compute YoY changes.
+
+    Returns:
+      {
+        "latest_date": "2026-03-31",
+        "latest_eps": 7.9,
+        "prev_eps": 3.93,
+        "eps_growth": 1.01,
+        "latest_revenue": 124035086000.0,
+        "prev_revenue": 118919406000.0,
+        "revenue_growth": 0.043,
+        "latest_gross_margin": 35.51,
+        "prev_gross_margin": 31.77,
+        "margin_change": 3.74,
+      }
+    """
+    try:
+        ticker = yf.Ticker(f"{stock_id}.TW")
+        qf = ticker.quarterly_financials
+    except Exception:
         return None
-    current_eps = eps_hist[0]
-    target_idx = min(251, len(eps_hist) - 1)
-    year_ago_eps = eps_hist[target_idx]
-    if not year_ago_eps or year_ago_eps <= 0:
+    if qf is None or qf.empty:
         return None
-    return (current_eps - year_ago_eps) / year_ago_eps
+
+    def _get_series(name: str):
+        if name not in qf.index:
+            return None
+        s = qf.loc[name]
+        return [(d, v) for d, v in s.items() if v is not None and (isinstance(v, float) and not math.isnan(v))]
+
+    def _find_yoy(series, get_quarter_fn):
+        sorted_vals = sorted(series, key=lambda x: x[0], reverse=True)
+        for i, (d, v) in enumerate(sorted_vals):
+            q = get_quarter_fn(d)
+            for d2, v2 in sorted_vals[i + 1:]:
+                if get_quarter_fn(d2) == q and d2.year == d.year - 1:
+                    return v, v2, d
+        return None
+
+    def _quarter(d):
+        return d.quarter
+
+    result = {}
+
+    # EPS
+    eps_series = _get_series("Diluted EPS")
+    if eps_series and len(eps_series) >= 2:
+        eps_yoy = _find_yoy(eps_series, _quarter)
+        if eps_yoy:
+            latest_eps, prev_eps, latest_date = eps_yoy
+            result["latest_date"] = str(latest_date.date())
+            result["latest_eps"] = latest_eps
+            result["prev_eps"] = prev_eps
+            result["eps_growth"] = (latest_eps - prev_eps) / prev_eps
+
+    # Revenue — prefer MOPS monthly revenue over yfinance quarterly
+    mops_rev = None
+    try:
+        from tw_quant_signal.twse_client import fetch_monthly_revenue
+        today = date.today()
+        mops_rev = fetch_monthly_revenue(stock_id, month=today.month - 1)
+        if not mops_rev:
+            mops_rev = fetch_monthly_revenue(stock_id, month=today.month - 2)
+    except Exception:
+        pass
+    if mops_rev and mops_rev.get("revenue"):
+        result["latest_revenue"] = mops_rev["revenue"] * 1000  # 千元 → 元
+        result["prev_revenue"] = mops_rev["prev_year_revenue"] * 1000
+        result["revenue_growth"] = mops_rev["yoy_pct"] / 100.0
+        result["revenue_source"] = "mops_monthly"
+    else:
+        rev_series = _get_series("Total Revenue")
+        if rev_series and len(rev_series) >= 2:
+            rev_yoy = _find_yoy(rev_series, _quarter)
+            if rev_yoy:
+                latest_rev, prev_rev, _ = rev_yoy
+                result["latest_revenue"] = latest_rev
+                result["prev_revenue"] = prev_rev
+                result["revenue_growth"] = (latest_rev - prev_rev) / prev_rev if prev_rev else None
+                result["revenue_source"] = "yfinance_quarterly"
+
+    # Gross Profit
+    gp_series = _get_series("Gross Profit")
+    rev2 = _get_series("Total Revenue")
+    if gp_series and rev2 and len(gp_series) >= 2 and len(rev2) >= 2:
+        gp_map = {d.date(): v for d, v in gp_series}
+        rev_map = {d.date(): v for d, v in rev2}
+        common_dates = sorted(set(gp_map.keys()) & set(rev_map.keys()), reverse=True)
+        margins = [(d, gp_map[d] / rev_map[d] * 100) for d in common_dates]
+        if len(margins) >= 2:
+            result["latest_gross_margin"] = round(margins[0][1], 2)
+            result["prev_gross_margin"] = round(margins[1][1], 2)
+            result["margin_change"] = round(margins[0][1] - margins[1][1], 2)
+
+    return result if result else None
 
 
 def _fetch_and_store_financials(db: SignalDB, stock_id: str) -> Optional[dict]:
@@ -151,28 +239,57 @@ def _fetch_margin_ratio(db: SignalDB, stock_id: str) -> Optional[float]:
 
 
 def _score_fundamental(db: SignalDB, stock_id: str) -> dict:
-    eps_growth = _compute_eps_yoy_growth(db, stock_id)
     fin = _fetch_and_store_financials(db, stock_id)
+    yf_snap = _get_yf_quarterly_snapshot(stock_id)
+    feat = _get_latest_features(db, stock_id)
+    close = _safe(feat.get("close")) if feat else None
 
-    gross_margin_val = None
-    rev = None
-    if fin:
-        gross_margin_val = fin.get("gross_margin")
-        rev = fin.get("revenue")
-        eps_fin = fin.get("eps")
-        if eps_fin is not None and eps_growth is None:
-            eps_growth = (eps_fin / 8.0 - 1) if eps_fin else None
-
+    # EPS growth
+    if yf_snap and "eps_growth" in yf_snap:
+        eps_growth = yf_snap["eps_growth"]
+        latest_eps = yf_snap["latest_eps"]
+        prev_eps = yf_snap["prev_eps"]
+    else:
+        eps_growth = None
+        latest_eps = None
+        prev_eps = None
     eps_score = _clamp(50 + (eps_growth or 0) * 100) if eps_growth is not None else 50
 
-    if rev is not None:
-        rev_score = _clamp(40 + rev / 1e10)
+    # Revenue YoY
+    if yf_snap and "revenue_growth" in yf_snap:
+        rev_growth = yf_snap["revenue_growth"]
+        latest_rev = yf_snap["latest_revenue"]
+        prev_rev = yf_snap["prev_revenue"]
+        rev_score = _clamp(50 + (rev_growth or 0) * 100)
     else:
-        rev_score = 50
+        rev_growth = None
+        latest_rev = fin.get("revenue") if fin else None
+        prev_rev = None
+        raw_rev = latest_rev
+        rev_score = _clamp(40 + (raw_rev or 0) / 1e10) if raw_rev is not None else 50
 
-    if gross_margin_val is not None:
-        mg_score = _clamp((gross_margin_val - 15) * 2)
+    # Gross margin
+    if yf_snap and "margin_change" in yf_snap:
+        gross_margin_val = yf_snap["latest_gross_margin"]
+        prev_gm = yf_snap["prev_gross_margin"]
+        gm_change = yf_snap["margin_change"]
+        if gm_change > 3:
+            mg_score = 100
+        elif gm_change > 0:
+            mg_score = 70
+        elif gm_change > -3:
+            mg_score = 50
+        else:
+            mg_score = 0
+    elif fin:
+        gross_margin_val = fin.get("gross_margin")
+        prev_gm = None
+        gm_change = None
+        mg_score = _clamp((gross_margin_val - 15) * 2) if gross_margin_val is not None else 50
     else:
+        gross_margin_val = None
+        prev_gm = None
+        gm_change = None
         mg_score = 50
 
     weighted = eps_score * 0.40 + rev_score * 0.30 + mg_score * 0.30
@@ -180,19 +297,42 @@ def _score_fundamental(db: SignalDB, stock_id: str) -> dict:
         "score": round(weighted, 2),
         "light": _sub_light(weighted),
         "sub": {
-            "eps_growth": {"score": round(eps_score, 2), "light": _sub_light(eps_score),
-                           "value": round(eps_growth * 100, 2) if eps_growth is not None else None},
-            "revenue_yoy": {"score": round(rev_score, 2), "light": _sub_light(rev_score),
-                            "value": rev, "note": "yfinance quarterly"},
-            "gross_margin": {"score": round(mg_score, 2), "light": _sub_light(mg_score),
-                             "value": gross_margin_val, "note": "yfinance quarterly"},
+            "eps_growth": {
+                "score": round(eps_score, 2), "light": _sub_light(eps_score),
+                "value": round(eps_growth * 100, 2) if eps_growth is not None else None,
+                "inputs": {
+                    "latest_eps": latest_eps,
+                    "prev_eps": prev_eps,
+                } if latest_eps is not None else None,
+            },
+            "revenue_yoy": {
+                "score": round(rev_score, 2), "light": _sub_light(rev_score),
+                "value": round(rev_growth * 100, 2) if rev_growth is not None else (latest_rev if latest_rev else None),
+                "inputs": {
+                    "latest_revenue": latest_rev,
+                    "prev_revenue": prev_rev,
+                    "source": yf_snap.get("revenue_source", "yfinance") if yf_snap else "yfinance",
+                } if latest_rev is not None else None,
+            },
+            "gross_margin": {
+                "score": round(mg_score, 2), "light": _sub_light(mg_score),
+                "value": gross_margin_val,
+                "inputs": {
+                    "latest_gm": gross_margin_val,
+                    "prev_gm": prev_gm,
+                } if gross_margin_val is not None else None,
+            },
         },
     }
 
 
 def _score_institutional(db: SignalDB, stock_id: str) -> dict:
     inst = _get_institutional_5d(db, stock_id)
-    margin_ratio = _fetch_margin_ratio(db, stock_id)
+    margin_raw = db.get_latest_margin_raw(stock_id)
+    if margin_raw is None:
+        margin_ratio = _fetch_margin_ratio(db, stock_id)
+    else:
+        margin_ratio = margin_raw["margin_ratio"]
 
     if not inst:
         return {
@@ -209,8 +349,10 @@ def _score_institutional(db: SignalDB, stock_id: str) -> dict:
     vol_ma20 = inst["volume_ma20"] or 1
     total_vol_5d = vol_ma20 * 5
 
-    foreign_ratio = (inst["foreign_5d_sum"] or 0) / total_vol_5d if total_vol_5d > 0 else 0
-    sity_ratio = (inst["sity_5d_sum"] or 0) / total_vol_5d if total_vol_5d > 0 else 0
+    foreign_5d_sum = inst["foreign_5d_sum"] or 0
+    sity_5d_sum = inst["sity_5d_sum"] or 0
+    foreign_ratio = foreign_5d_sum / total_vol_5d if total_vol_5d > 0 else 0
+    sity_ratio = sity_5d_sum / total_vol_5d if total_vol_5d > 0 else 0
 
     if foreign_ratio > 0.10:
         foreign_score = 90
@@ -241,12 +383,26 @@ def _score_institutional(db: SignalDB, stock_id: str) -> dict:
         "score": round(weighted, 2),
         "light": _sub_light(weighted),
         "sub": {
-            "foreign_ratio": {"score": foreign_score, "light": _sub_light(foreign_score),
-                              "value": round(foreign_ratio * 100, 2)},
-            "sity_ratio": {"score": sity_score, "light": _sub_light(sity_score),
-                           "value": round(sity_ratio * 100, 2)},
-            "margin_ratio": {"score": margin_score_val, "light": _sub_light(margin_score_val),
-                             "value": margin_ratio},
+            "foreign_ratio": {
+                "score": foreign_score, "light": _sub_light(foreign_score),
+                "value": round(foreign_ratio * 100, 2),
+                "inputs": {"buy_5d": int(foreign_5d_sum), "vol_ma20": int(vol_ma20)},
+            },
+            "sity_ratio": {
+                "score": sity_score, "light": _sub_light(sity_score),
+                "value": round(sity_ratio * 100, 2),
+                "inputs": {"buy_5d": int(sity_5d_sum), "vol_ma20": int(vol_ma20)},
+            },
+            "margin_ratio": {
+                "score": margin_score_val, "light": _sub_light(margin_score_val),
+                "value": margin_ratio,
+                "inputs": {
+                    "margin_balance": margin_raw["margin_balance"],
+                    "short_balance": margin_raw["short_balance"],
+                    "margin_balance_unit": "張",
+                    "short_balance_unit": "股",
+                } if margin_raw else None,
+            },
         },
     }
 
@@ -265,13 +421,48 @@ def _margin_score(ratio: Optional[float]) -> float:
     return 20
 
 
-def _score_technical(db: SignalDB, stock_id: str) -> dict:
+def _score_technical(db: SignalDB, stock_id: str, weekly: bool = False) -> dict:
     feat = _get_latest_features(db, stock_id)
-    ind = _get_latest_indicators(db, stock_id)
-    if not feat or not ind:
+    ind = _get_latest_weekly_indicators(db, stock_id) if weekly else _get_latest_indicators(db, stock_id)
+    if not ind:
         return {"score": 50.0, "light": LIGHT_YELLOW, "sub": {}}
 
-    ma_align = feat.get("ma_alignment", "neutral")
+    if weekly:
+        ma5 = _safe(ind.get("ma5"))
+        ma20 = _safe(ind.get("ma20"))
+        ma60 = _safe(ind.get("ma60"))
+        if ma5 is not None and ma20 is not None and ma60 is not None:
+            if ma5 > ma20 > ma60:
+                ma_align = "bullish"
+            elif ma5 < ma20 < ma60:
+                ma_align = "bearish"
+            else:
+                ma_align = "neutral"
+        else:
+            ma_align = "neutral"
+        close = _safe(ind.get("close")) or _safe(feat.get("close")) if feat else None
+        bb_lower = _safe(ind.get("bb_lower"))
+        bb_upper = _safe(ind.get("bb_upper"))
+        bb_mid = _safe(ind.get("bb_middle"))
+        if close is not None and bb_lower is not None and bb_mid is not None and bb_upper is not None:
+            if close >= bb_upper:
+                bb_pos = "above_upper"
+            elif close <= bb_lower:
+                bb_pos = "below_lower"
+            elif close >= bb_mid:
+                bb_pos = "above_mid"
+            else:
+                bb_pos = "below_mid"
+        else:
+            bb_pos = "mid"
+    else:
+        if not feat:
+            return {"score": 50.0, "light": LIGHT_YELLOW, "sub": {}}
+        ma_align = feat.get("ma_alignment", "neutral")
+        bb_pos = feat.get("bb_position", "above_mid")
+        close = _safe(feat.get("close"))
+
+    ma_align = ma_align or "neutral"
     if ma_align == "bullish":
         ma_score = 85
     elif ma_align == "bearish":
@@ -298,20 +489,14 @@ def _score_technical(db: SignalDB, stock_id: str) -> dict:
     else:
         rsi_score = 50
 
-    bb_pos = feat.get("bb_position", "above_mid")
-    close = _safe(feat.get("close"))
-    bb_lower = _safe(ind.get("bb_lower"))
-    bb_upper = _safe(ind.get("bb_upper"))
-    bb_mid = _safe(ind.get("bb_middle"))
-    if close is not None and bb_lower is not None and bb_mid is not None and bb_upper is not None:
-        if close <= bb_lower:
-            bb_score = 85
-        elif close <= bb_mid:
-            bb_score = 40
-        elif close <= bb_upper:
-            bb_score = 60
-        else:
-            bb_score = 25
+    if bb_pos == "below_lower":
+        bb_score = 85
+    elif bb_pos == "below_mid":
+        bb_score = 40
+    elif bb_pos in ("above_mid", "mid"):
+        bb_score = 60
+    elif bb_pos == "above_upper":
+        bb_score = 25
     else:
         bb_score = 50
 
@@ -320,12 +505,30 @@ def _score_technical(db: SignalDB, stock_id: str) -> dict:
         "score": round(weighted, 2),
         "light": _sub_light(weighted),
         "sub": {
-            "ma_alignment": {"score": ma_score, "light": _sub_light(ma_score),
-                             "value": ma_align},
-            "rsi14": {"score": rsi_score, "light": _sub_light(rsi_score),
-                      "value": rsi},
-            "bb_position": {"score": bb_score, "light": _sub_light(bb_score),
-                            "value": bb_pos},
+            "ma_alignment": {
+                "score": ma_score, "light": _sub_light(ma_score),
+                "value": ma_align,
+                "inputs": {
+                    "ma5": round(_safe(ind.get("ma5")), 2) if ind.get("ma5") else None,
+                    "ma20": round(_safe(ind.get("ma20")), 2) if ind.get("ma20") else None,
+                    "ma60": round(_safe(ind.get("ma60")), 2) if ind.get("ma60") else None,
+                },
+            },
+            "rsi14": {
+                "score": rsi_score, "light": _sub_light(rsi_score),
+                "value": rsi,
+                "inputs": {"rsi": rsi} if rsi is not None else None,
+            },
+            "bb_position": {
+                "score": bb_score, "light": _sub_light(bb_score),
+                "value": bb_pos,
+                "inputs": {
+                    "close": round(close, 2) if close is not None else None,
+                    "bb_upper": round(bb_upper, 2) if bb_upper is not None else None,
+                    "bb_middle": round(bb_mid, 2) if bb_mid is not None else None,
+                    "bb_lower": round(bb_lower, 2) if bb_lower is not None else None,
+                },
+            },
         },
     }
 
@@ -338,6 +541,7 @@ def _score_valuation(db: SignalDB, stock_id: str) -> dict:
     pe_river = feat.get("pe_river", "mid")
     pb_river = feat.get("pb_river", "mid")
     dy = _safe(feat.get("dividend_yield"))
+    close = _safe(feat.get("close"))
 
     if pe_river == "low":
         pe_score = 80
@@ -374,13 +578,71 @@ def _score_valuation(db: SignalDB, stock_id: str) -> dict:
                          "value": pe_river},
             "pb_river": {"score": pb_score, "light": _sub_light(pb_score),
                          "value": pb_river},
-            "dividend_yield": {"score": dy_score, "light": _sub_light(dy_score),
-                               "value": round(dy * 100, 2) if dy is not None else None},
+            "dividend_yield": {
+                "score": dy_score, "light": _sub_light(dy_score),
+                "value": round(dy * 100, 2) if dy is not None else None,
+                "inputs": {"dividend_yield": dy, "close": close} if dy is not None else None,
+            },
         },
     }
 
 
-def compute_health_check(db: SignalDB, trade_date: Optional[str] = None) -> list[dict]:
+def _get_latest_weekly_indicators(db: SignalDB, stock_id: str) -> Optional[dict]:
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT ma5, ma20, ma60, rsi14, bb_upper, bb_middle, bb_lower, "
+            "volume_ma5, volume_ma20 FROM weekly_indicators "
+            "WHERE stock_id=? ORDER BY trade_date DESC LIMIT 1",
+            [stock_id],
+        ).fetchone()
+        if not row:
+            return None
+        keys = ["ma5", "ma20", "ma60", "rsi14", "bb_upper", "bb_middle", "bb_lower",
+                "volume_ma5", "volume_ma20"]
+        return dict(zip(keys, row))
+
+
+def compute_health_check_weekly(db: SignalDB, trade_date: Optional[str] = None) -> list[dict]:
+    """Weekly-level health check using weekly indicators. Same scoring logic as daily."""
+    trade_date = trade_date or date.today().isoformat()
+    results = []
+    for sid in WATCH_STOCKS:
+        # Fundamental uses same yfinance data (quarterly, same across timeframes)
+        fundamental = _score_fundamental(db, sid)
+        # Institutional same data source
+        institutional = _score_institutional(db, sid)
+        # Technical uses weekly indicators
+        technical = _score_technical(db, sid, weekly=True)
+        # Valuation uses same features
+        valuation = _score_valuation(db, sid)
+
+        total = (fundamental["score"] * 0.25 + institutional["score"] * 0.25 +
+                 technical["score"] * 0.25 + valuation["score"] * 0.25)
+
+        results.append({
+            "stock_id": sid,
+            "trade_date": trade_date,
+            "fundamental_score": fundamental["score"],
+            "fundamental_light": fundamental["light"],
+            "institutional_score": institutional["score"],
+            "institutional_light": institutional["light"],
+            "technical_score": technical["score"],
+            "technical_light": technical["light"],
+            "valuation_score": valuation["score"],
+            "valuation_light": valuation["light"],
+            "total_score": round(total, 2),
+            "total_light": _total_light(total),
+            "details": {
+                "fundamental": fundamental,
+                "institutional": institutional,
+                "technical": technical,
+                "valuation": valuation,
+            },
+        })
+    return results
+
+
+def compute_health_check(db: SignalDB, trade_date: Optional[str] = None, weekly: bool = False) -> list[dict]:
     trade_date = trade_date or date.today().isoformat()
     mstate = detect_market_state(db, trade_date)["state"]
     results = []

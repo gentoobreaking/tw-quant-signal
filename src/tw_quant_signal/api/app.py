@@ -242,6 +242,25 @@ def update_config(body: dict):
     return {"status": "ok"}
 
 
+# ---- Health check config endpoints ----
+
+HEALTH_CHECK_CONFIG_PATH = RULES_DIR / "health_check.yaml"
+
+
+@app.get("/api/health-check-config")
+def get_health_check_config():
+    with open(HEALTH_CHECK_CONFIG_PATH) as f:
+        cfg = yaml.safe_load(f)
+    return {"data": cfg or {}}
+
+
+@app.put("/api/health-check-config")
+def update_health_check_config(body: dict):
+    with open(HEALTH_CHECK_CONFIG_PATH, "w") as f:
+        yaml.dump(body, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    return {"status": "ok"}
+
+
 # ---- Health & Dashboard ----
 
 @app.get("/api/health")

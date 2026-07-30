@@ -1,88 +1,118 @@
+import { useQuery } from '@tanstack/react-query'
+import { api } from '../api/client'
 import GaugeChart from './GaugeChart'
 
-interface SubIndicator {
-  name: string
-  weight: string
-  scoring: string
+const ASPECT_KEYS = ['fundamental', 'institutional', 'technical', 'valuation'] as const
+
+const PCT_KEYS = new Set(['eps_growth', 'revenue_yoy', 'foreign_ratio', 'sity_ratio', 'margin_ratio', 'dividend_yield'])
+
+function fmt(n: number, d: number = 2) {
+  return n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d })
 }
 
-const ASPECTS: Record<string, { label: string; sub: SubIndicator[] }> = {
-  fundamental: {
-    label: '基本面',
-    sub: [
-      { name: 'EPS 成長率', weight: '40%', scoring: '近4季 vs 前4季：≥20%→100, ≥10%→70, ≥0%→40, <0%→0' },
-      { name: '營收成長率', weight: '30%', scoring: '近季 vs 去年同期：≥15%→100, ≥5%→70, ≥0%→40, <0%→0' },
-      { name: '毛利率趨勢', weight: '30%', scoring: '近季 vs 前季：上升→100, 持平→50, 下降→0' },
-    ],
-  },
-  institutional: {
-    label: '籌碼面',
-    sub: [
-      { name: '外資持股占比', weight: '40%', scoring: '外資近5日淨買超/流通股數：>0.1%→100, >0%→60, >-0.1%→30, ≤-0.1%→0' },
-      { name: '投信持股占比', weight: '30%', scoring: '投信近5日淨買超/流通股數：>0.05%→100, >0%→60, >-0.05%→30, ≤-0.05%→0' },
-      { name: '券資比', weight: '30%', scoring: '融券/融資：>20%→100, >10%→70, >5%→40, ≤5%→0' },
-    ],
-  },
-  technical: {
-    label: '技術面',
-    sub: [
-      { name: '均線排列', weight: '40%', scoring: 'MA5>MA20>MA60→多頭100, MA5<MA20<MA60→空頭0, 其他→中立50' },
-      { name: 'RSI 指標', weight: '30%', scoring: 'RSI>70→過熱0, RSI>50→偏多100, RSI>30→中立50, ≤30→超賣0' },
-      { name: '布林通道', weight: '30%', scoring: '價格>上軌→過熱0, 價格於上軌與中軌間→偏多100, 中軌與下軌間→偏空0, <下軌→超賣100' },
-    ],
-  },
-  valuation: {
-    label: '估值面',
-    sub: [
-      { name: '本益比', weight: '40%', scoring: 'PE vs 5年均值：<80%→低估100, <100%→偏低70, <120%→偏高30, ≥120%→高估0' },
-      { name: '股價淨值比', weight: '30%', scoring: 'PB vs 5年均值：<80%→低估100, <100%→偏低70, <120%→偏高30, ≥120%→高估0' },
-      { name: '殖利率', weight: '30%', scoring: 'DY vs 5年均值：>120%→高殖利100, >100%→偏高70, >80%→偏低30, ≤80%→低殖利0' },
-    ],
-  },
+function renderExpression(subKey: string, rs: Record<string, any> | undefined): string {
+  if (!rs) return '-'
+  const inputs = rs.inputs
+  const val = rs.value
+
+  if (subKey === 'eps_growth' && inputs?.latest_eps != null && inputs?.prev_eps != null) {
+    const c = inputs.latest_eps, p = inputs.prev_eps
+    return `(${fmt(c)} - ${fmt(p)}) / ${fmt(p)} × 100% = ${val != null ? fmt(val) + '%' : '-'}`
+  }
+  if (subKey === 'revenue_yoy' && inputs?.latest_revenue != null && inputs?.prev_revenue != null) {
+    const lr = inputs.latest_revenue, pr = inputs.prev_revenue
+    return `(${lr.toLocaleString()} - ${pr.toLocaleString()}) / ${pr.toLocaleString()} × 100% = ${val != null ? fmt(val) + '%' : '-'}`
+  }
+  if (subKey === 'gross_margin' && inputs?.latest_gm != null && inputs?.prev_gm != null) {
+    return `本期${fmt(inputs.latest_gm)}% - 上期${fmt(inputs.prev_gm)}% = ${inputs.latest_gm - inputs.prev_gm >= 0 ? '+' : ''}${fmt(inputs.latest_gm - inputs.prev_gm)}% → ${val != null ? fmt(val, 0) + '分' : '-'}`
+  }
+  if ((subKey === 'foreign_ratio' || subKey === 'sity_ratio') && inputs?.buy_5d != null && inputs?.vol_ma20 != null) {
+    const b = inputs.buy_5d, v = inputs.vol_ma20
+    return `${b.toLocaleString()} / (${v.toLocaleString()} × 5) × 100% = ${val != null ? fmt(val) + '%' : '-'}`
+  }
+  if (subKey === 'margin_ratio' && inputs?.margin_balance != null && inputs?.short_balance != null) {
+    const mb = inputs.margin_balance, sb = Math.round(inputs.short_balance / 1000)
+    return `融券${sb.toLocaleString()}張 / 融資${mb.toLocaleString()}張 × 100% = ${val != null ? fmt(val) + '%' : '-'}`
+  }
+  if (subKey === 'ma_alignment' && inputs?.ma5 != null && inputs?.ma20 != null && inputs?.ma60 != null) {
+    const { ma5, ma20, ma60 } = inputs
+    return `MA5=${fmt(ma5, 0)}, MA20=${fmt(ma20, 0)}, MA60=${fmt(ma60, 0)} → ${val ?? '-'}`
+  }
+  if (subKey === 'rsi14' && inputs?.rsi != null) {
+    return `RSI=${fmt(inputs.rsi)}`
+  }
+  if (subKey === 'bb_position' && inputs?.close != null && inputs?.bb_upper != null && inputs?.bb_middle != null && inputs?.bb_lower != null) {
+    const { close, bb_upper, bb_middle, bb_lower } = inputs
+    return `收=${fmt(close, 0)}, 上=${fmt(bb_upper, 0)}, 中=${fmt(bb_middle, 0)}, 下=${fmt(bb_lower, 0)} → ${val ?? '-'}`
+  }
+  if (subKey === 'dividend_yield' && inputs?.dividend_yield != null && inputs?.close != null) {
+    const dy = inputs.dividend_yield * 100, c = inputs.close
+    return `股利/${fmt(c, 0)} × 100% = ${fmt(dy)}%`
+  }
+  // fallback
+  return `${val != null ? (typeof val === 'number' ? fmt(val) : val) : '-'}`
 }
 
 export default function HealthAspectDetail({ stockId, health }: { stockId: string; health: Record<string, any> | null }) {
+  const { data: hcConfig } = useQuery({
+    queryKey: ['health-check-config'],
+    queryFn: () => api.healthCheckConfig(),
+    staleTime: 60_000,
+  })
+
   if (!health) return null
+
+  const aspects = (hcConfig?.aspects || {}) as Record<string, any>
 
   return (
     <div className="card">
       <h2>🔍 四面向健診細項</h2>
       <div className="grid-4 mt-8" style={{ marginBottom: 16 }}>
-        {(['fundamental', 'institutional', 'technical', 'valuation'] as const).map(key => (
+        {ASPECT_KEYS.map(key => (
           <GaugeChart
             key={key}
             score={health[`${key}_score`] ?? 0}
             light={health[`${key}_light`] ?? '🟡'}
-            label={ASPECTS[key].label}
+            label={aspects[key]?.label || key}
             size={100}
           />
         ))}
       </div>
-      {(['fundamental', 'institutional', 'technical', 'valuation'] as const).map(aspectKey => {
-        const aspect = ASPECTS[aspectKey]
+      {ASPECT_KEYS.map(aspectKey => {
+        const aspect = aspects[aspectKey]
+        if (!aspect) return null
         return (
           <details key={aspectKey} style={{ marginBottom: 8 }}>
             <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 600, padding: '8px 0', color: 'var(--text)' }}>
               {aspect.label} — {Math.round(health[`${aspectKey}_score`] ?? 0)} 分
             </summary>
-            <table style={{ fontSize: 12 }}>
-              <thead>
-                <tr>
-                  <th style={{ width: '25%' }}>指標</th>
-                  <th style={{ width: '10%' }}>權重</th>
-                  <th style={{ width: '65%' }}>計分方式</th>
-                </tr>
-              </thead>
-              <tbody>
-                {aspect.sub.map(sub => (
-                  <tr key={sub.name}>
-                    <td>{sub.name}</td>
-                    <td>{sub.weight}</td>
-                    <td className="text-dim" style={{ fontSize: 11 }}>{sub.scoring}</td>
+              <table style={{ fontSize: 12 }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: '15%' }}>指標</th>
+                    <th style={{ width: '7%' }}>權重</th>
+                    <th style={{ width: '22%' }}>計分方式</th>
+                    <th style={{ width: '22%' }}>計算公式</th>
+                    <th style={{ width: '34%' }}>結果</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {(aspect.sub || []).map((sub: any) => {
+                    const runtimeSub = health.details?.[aspectKey]?.sub?.[sub.key]
+                    const score = runtimeSub?.score
+                    const expr = renderExpression(sub.key, runtimeSub)
+                    return (
+                      <tr key={sub.key || sub.name}>
+                        <td>{sub.name}</td>
+                        <td>{sub.weight}%</td>
+                        <td className="text-dim" style={{ fontSize: 11 }}>{sub.scoring}</td>
+                        <td className="text-dim" style={{ fontSize: 11, fontFamily: 'monospace' }}>{sub.formula || '-'}</td>
+                        <td style={{ fontSize: 11, fontFamily: 'monospace' }}>{expr} → {score != null ? `${score}分` : '-'}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
           </details>
         )
       })}
