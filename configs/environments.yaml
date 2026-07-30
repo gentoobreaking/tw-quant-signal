@@ -1,0 +1,28 @@
+# Research / Production Environment Separation — Operation Log
+
+research: true   # true = research mode (自由調整參數/測試新規則/獨立回測)
+                 # false = production mode (僅使用通過驗證的穩定規則)
+
+# 實戰規則白名單 — production mode 下僅執行此處列出的 rule_id
+# 規則由研究環境驗證通過後手動搬入
+production_rule_ids: []
+
+# 規則審核門檻（晉升至實戰條件）
+promotion:
+  min_backtest_trades: 30        # 最少回測交易次數
+  min_win_rate: 0.55             # 最低歷史勝率
+  min_sharpe: 1.0                # 最低 Sharpe ratio
+  approval_required: true        # 需人工確認
+
+# 操作日誌設定
+logging:
+  enabled: true
+  record_signals: true           # 記錄每次訊號產出
+  record_rule_versions: true     # 記錄規則版本快照
+  record_config_changes: true    # 記錄設定變更
+
+# 免責聲明（顯示於報告與通知）
+disclaimer: |
+  本系統為個人研究工具，產出之所有訊號與建議僅供參考。
+  投資決策應由使用者自行判斷，盈虧自負。
+  本系統不涉及證券投資顧問業務。

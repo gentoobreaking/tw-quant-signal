@@ -16,6 +16,11 @@ from tw_quant_signal.risk_manager import compute_risk_metrics, RISK_LEVELS
 from tw_quant_signal.indicators import compute_weekly_indicators, compute_monthly_indicators
 from tw_quant_signal.multi_timeframe import compute_multi_timeframe
 from tw_quant_signal.structural_change import compute_all_drift, store_drift_results, generate_structural_change_report
+from tw_quant_signal.env_manager import is_production_mode, get_summary, filter_rules_for_production
+from tw_quant_signal.operation_log import (
+    log_pipeline_run, log_signal_output,
+    build_compliance_report, get_compliance_statement,
+)
 
 
 def _gather_report_data(db):
@@ -237,11 +242,28 @@ def main():
         msg = f"⚠️ *管線異常 — {run_date}*\n" + "\n".join(f"- {a}" for a in anomalies)
         send_alert(msg)
 
+    # Production mode: filter rules if in production
+    if is_production_mode():
+        allowed_ids = get_summary()["production_rule_ids"]
+        if not allowed_ids:
+            print("  → 實戰模式無白名單規則，跳過規則訊號產出")
+            rules_result = []
+        else:
+            rules_result = [r for r in rules_result if r.get("stock_id") in allowed_ids or any(
+                tr.get("rule_id") in allowed_ids for tr in r.get("triggered_rules", []))]
+            print(f"  → 實戰模式: 過濾後 {len(rules_result)} 筆 (白名單 {len(allowed_ids)} 條規則)")
+
     report_data = _gather_report_data(db)
-    send_alert(build_daily_report(status, report_data, mstate["state"] if mstate else None))
+    disclaimer = get_compliance_statement()
+    daily_msg = build_daily_report(status, report_data, mstate["state"] if mstate else None)
+    daily_msg += f"\n\n⚖️ {disclaimer.split('.')[0]}。"
+    send_alert(daily_msg)
 
     if risk_metrics:
         send_risk_report(risk_metrics)
+
+    # Log to operation log
+    log_pipeline_run(db, run_date, status, 0)
 
     # Structural change detection
     try:

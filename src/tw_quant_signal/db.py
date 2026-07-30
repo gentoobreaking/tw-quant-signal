@@ -249,6 +249,20 @@ def _init_schema(conn: sqlite3.Connection):
             details         TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_structural_drift ON structural_drift(trade_date, drift_type);
+
+        CREATE TABLE IF NOT EXISTS operation_log (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            log_date        TEXT NOT NULL,
+            stock_id        TEXT,
+            action          TEXT NOT NULL,
+            signal          TEXT,
+            score           INTEGER,
+            mode            TEXT,
+            rule_version_hash TEXT,
+            details         TEXT,
+            created_at      TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_operation_log ON operation_log(log_date, action);
     """)
 
 

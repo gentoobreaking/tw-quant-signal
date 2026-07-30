@@ -314,6 +314,36 @@ def drift_report():
     return {"data": {"report": "無足夠資料產生結構變化偵測報告"}}
 
 
+# ---- Environment & Governance endpoints ----
+
+@app.get("/api/environment")
+def get_environment():
+    from tw_quant_signal.env_manager import get_summary
+    return {"data": get_summary()}
+
+
+@app.get("/api/compliance-statement")
+def compliance_statement():
+    from tw_quant_signal.operation_log import get_compliance_statement
+    return {"data": {"statement": get_compliance_statement()}}
+
+
+@app.get("/api/compliance-report")
+def compliance_report():
+    from tw_quant_signal.operation_log import build_compliance_report
+    db = _get_db()
+    report = build_compliance_report(db)
+    return {"data": {"report": report}}
+
+
+@app.get("/api/operation-log")
+def operation_log(days: int = Query(default=7, ge=1, le=90)):
+    from tw_quant_signal.operation_log import get_operation_log
+    db = _get_db()
+    log = get_operation_log(db, days=days)
+    return {"data": log}
+
+
 @app.get("/api/multi-timeframe")
 def multi_timeframe():
     db = _get_db()

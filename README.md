@@ -18,7 +18,7 @@
            │ SQLite
 ┌──────────▼──────────────────────────┐
 │         Data Layer (SignalDB)        │
-│  18 張表 · 股價/指標/籌碼/財務/健診/衰退監控 │
+│  19 張表 · 股價/指標/籌碼/財務/健診/衰退監控/日誌 │
 └─────────────────────────────────────┘
 ```
 
@@ -33,7 +33,7 @@ src/tw_quant_signal/
 ├── backfill.py         # 歷史回補腳本
 ├── backtest.py         # 規則回測框架
 ├── config.py           # 設定載入 (config.json + 環境變數)
-├── db.py               # 資料庫層 (18 張表, CRUD 方法)
+├── db.py               # 資料庫層 (19 張表, CRUD 方法)
 ├── features.py         # 特徵工程 (技術/籌碼/估值 50+ 欄位)
 ├── health_check.py     # 四燈號健診評分引擎 (日/週/月三級別)
 ├── indicators.py       # 技術指標計算 (MA/RSI/BB/成交量/週線/月線)
@@ -45,6 +45,8 @@ src/tw_quant_signal/
 ├── risk_manager.py     # 風險指標計算 (波動率/ATR/回撤/停損)
 ├── rules.py            # 規則引擎 (evaluate + aggregate + 加權)
 ├── structural_change.py # 結構變化偵測（規則衰退 / 特徵漂移 / 勝率衰退）
+├── env_manager.py       # 研究/實戰環境分離與規則治理
+├── operation_log.py     # 操作日誌與合規紀錄
 └── twse_client.py      # TWSE 資料源客戶端 (yfinance + FinMind)
 
 configs/
@@ -100,12 +102,18 @@ frontend/
 - **三級警報** — watch(偏移30%) / warning(50%) / critical(70%) + 自動通報
 - **不自動停用** — 衰退規則標記 `drift_status`，由人決定是否調整
 
+### ✅ Phase 3 — 環境分離與治理
+- **研究/實戰分離** — `TW_QUANT_MODE` 環境變數或 YAML 切換，不影響 git
+- **實戰白名單** — `production_rule_ids` 列管規則，production mode 下過濾
+- **規則晉升審核** — 門檻：回測交易≥30 / 勝率≥55% / Sharpe≥1.0，需人工確認
+- **操作日誌** — 5 類紀錄（管線/訊號/規則/設定/模式切換），含版本 hash 快照
+- **法規邊界** — `GOVERNANCE.md` 文件化，免責聲明自動附加於每日推播
+- **合規報告** — `GET /api/compliance-report` 含操作軌跡與法規說明
+
 ### 📋 待實作
 | Task | 說明 |
 |------|------|
 | 個股池訊號 (T010) | 精選觀察清單掃描引擎 |
-| 結構變化偵測 (T012) | 模型/規則衰退監控 |
-| 環境分離治理 (T013) | 研究/實戰環境分離與操作治理 |
 
 ## 快速開始
 
@@ -204,6 +212,10 @@ docker compose --profile scheduler up   # 額外啟動定時排程容器
 | `GET /api/multi-timeframe` | 多時間框架共識 |
 | `GET /api/structural-drift` | 結構變化偵測結果 (可選 `?today_only=false`) |
 | `GET /api/drift-report` | 結構變化 Markdown 報告 |
+| `GET /api/environment` | 當前環境狀態（模式、白名單、規則 hash） |
+| `GET /api/compliance-statement` | 法規邊界聲明 |
+| `GET /api/compliance-report` | 合規報告（操作軌跡 + 免責聲明） |
+| `GET /api/operation-log` | 操作日誌（?days=7） |
 | `GET /api/health-check-config` | 健診評分配置 |
 | `PUT /api/health-check-config` | 更新健診配置 |
 | `GET /api/rules` | 規則列表 |
@@ -213,7 +225,7 @@ docker compose --profile scheduler up   # 額外啟動定時排程容器
 
 ## 資料庫 Schema (SignalDB)
 
-18 張表涵蓋完整管線：
+19 張表涵蓋完整管線：
 
 | 表 | 用途 |
 |----|------|
@@ -234,6 +246,7 @@ docker compose --profile scheduler up   # 額外啟動定時排程容器
 | `monthly_health_scores` | 月線健診評分 |
 | `multi_timeframe_consensus` | 多時間框架共識 |
 | `structural_drift` | 結構變化偵測（規則衰退/特徵偏移） |
+| `operation_log` | 操作日誌（訊號產出/規則變更/模式切換） |
 
 ## 知識庫 / 參考
 
