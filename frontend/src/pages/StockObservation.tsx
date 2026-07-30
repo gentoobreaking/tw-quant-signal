@@ -5,6 +5,7 @@ import HealthCheckCard from '../components/HealthCheckCard'
 import RiskCard from '../components/RiskCard'
 import PriceChart from '../components/PriceChart'
 import DashboardCharts from '../components/DashboardCharts'
+import HealthAspectDetail from '../components/HealthAspectDetail'
 import type { StockDetail } from '../types'
 
 const STATE_LABEL: Record<string, string> = {
@@ -62,6 +63,9 @@ function StockDetailView({ stockId }: { stockId: string }) {
         <h2>📈 股價走勢</h2>
         <PriceChart prices={data.prices} indicators={data.indicators} />
       </div>
+
+      {/* Health aspect details */}
+      <HealthAspectDetail stockId={stockId} health={data.health} />
 
       {/* Signals */}
       {data.signals && (data.signals[0] as any)?.triggered_rules && (
