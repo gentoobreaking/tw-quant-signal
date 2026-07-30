@@ -1,6 +1,7 @@
 import sqlite3
 from contextlib import contextmanager
 from datetime import date
+from typing import Optional
 from pathlib import Path
 
 from tw_quant_signal.config import settings

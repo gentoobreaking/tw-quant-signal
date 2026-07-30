@@ -19,3 +19,6 @@ data/reports/
 frontend/node_modules/
 frontend/dist/
 frontend/*.tsbuildinfo
+
+# Docker
+postgres_data/

@@ -1,0 +1,31 @@
+services:
+  app:
+    image: tw-quant-signal:latest
+    container_name: tw-quant-signal
+    build: .
+    environment:
+      - TZ=Asia/Taipei
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./data:/app/data
+      - ./config.json:/app/config.json
+      - ./configs:/app/configs
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  scheduler:
+    image: tw-quant-signal:latest
+    container_name: tw-quant-signal-scheduler
+    profiles:
+      - scheduler
+    build: .
+    command: bash scripts/scheduler_cron.sh
+    environment:
+      - TZ=Asia/Taipei
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./data:/app/data
+      - ./config.json:/app/config.json
+      - ./configs:/app/configs
+    restart: unless-stopped
