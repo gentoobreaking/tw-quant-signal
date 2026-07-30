@@ -5,7 +5,9 @@ from typing import Optional
 import pandas as pd
 
 from tw_quant_signal.db import SignalDB
-from tw_quant_signal.twse_client import WATCH_STOCKS, fetch_valuations
+from tw_quant_signal.twse_client import (
+    WATCH_STOCKS, fetch_valuations, fetch_margin_data, fetch_yf_financials,
+)
 
 LIGHT_GREEN = "🟢"
 LIGHT_YELLOW_GREEN = "🟢🔴"
@@ -124,34 +126,73 @@ def _compute_eps_yoy_growth(db: SignalDB, stock_id: str) -> Optional[float]:
     return (current_eps - year_ago_eps) / year_ago_eps
 
 
+def _fetch_and_store_financials(db: SignalDB, stock_id: str) -> Optional[dict]:
+    existing = db.get_latest_financial_data(stock_id)
+    if existing and existing.get("revenue") is not None:
+        return existing
+    yf_data = fetch_yf_financials(stock_id)
+    if yf_data:
+        db.upsert_financial_data([yf_data])
+    return yf_data
+
+
+def _fetch_margin_ratio(db: SignalDB, stock_id: str) -> Optional[float]:
+    ratio = db.get_latest_margin_ratio(stock_id)
+    if ratio is not None:
+        return ratio
+    all_data = fetch_margin_data()
+    if not all_data or not all_data.get(stock_id):
+        all_data = fetch_margin_data((date.today() - timedelta(days=1)).isoformat())
+    if all_data:
+        rows = list(all_data.values())
+        db.upsert_margin_data(rows)
+    return db.get_latest_margin_ratio(stock_id)
+
+
 def _score_fundamental(db: SignalDB, stock_id: str) -> dict:
     eps_growth = _compute_eps_yoy_growth(db, stock_id)
+    fin = _fetch_and_store_financials(db, stock_id)
 
-    if eps_growth is not None:
-        eps_score = _clamp(50 + eps_growth * 100)
+    gross_margin_val = None
+    rev = None
+    if fin:
+        gross_margin_val = fin.get("gross_margin")
+        rev = fin.get("revenue")
+        eps_fin = fin.get("eps")
+        if eps_fin is not None and eps_growth is None:
+            eps_growth = (eps_fin / 8.0 - 1) if eps_fin else None
+
+    eps_score = _clamp(50 + (eps_growth or 0) * 100) if eps_growth is not None else 50
+
+    if rev is not None:
+        rev_score = _clamp(40 + rev / 1e10)
     else:
-        eps_score = 50
+        rev_score = 50
 
-    revenue_score = 50.0
-    margin_score = 50.0
+    if gross_margin_val is not None:
+        mg_score = _clamp((gross_margin_val - 15) * 2)
+    else:
+        mg_score = 50
 
-    weighted = eps_score * 0.40 + revenue_score * 0.30 + margin_score * 0.30
+    weighted = eps_score * 0.40 + rev_score * 0.30 + mg_score * 0.30
     return {
         "score": round(weighted, 2),
         "light": _sub_light(weighted),
         "sub": {
             "eps_growth": {"score": round(eps_score, 2), "light": _sub_light(eps_score),
                            "value": round(eps_growth * 100, 2) if eps_growth is not None else None},
-            "revenue_yoy": {"score": round(revenue_score, 2), "light": _sub_light(revenue_score),
-                            "value": None, "note": "no data"},
-            "gross_margin": {"score": round(margin_score, 2), "light": _sub_light(margin_score),
-                             "value": None, "note": "no data"},
+            "revenue_yoy": {"score": round(rev_score, 2), "light": _sub_light(rev_score),
+                            "value": rev, "note": "yfinance quarterly"},
+            "gross_margin": {"score": round(mg_score, 2), "light": _sub_light(mg_score),
+                             "value": gross_margin_val, "note": "yfinance quarterly"},
         },
     }
 
 
 def _score_institutional(db: SignalDB, stock_id: str) -> dict:
     inst = _get_institutional_5d(db, stock_id)
+    margin_ratio = _fetch_margin_ratio(db, stock_id)
+
     if not inst:
         return {
             "score": 50.0,
@@ -159,7 +200,8 @@ def _score_institutional(db: SignalDB, stock_id: str) -> dict:
             "sub": {
                 "foreign_ratio": {"score": 50.0, "light": LIGHT_YELLOW, "value": None, "note": "no data"},
                 "sity_ratio": {"score": 50.0, "light": LIGHT_YELLOW, "value": None, "note": "no data"},
-                "margin_ratio": {"score": 50.0, "light": LIGHT_YELLOW, "value": None, "note": "no data"},
+                "margin_ratio": {"score": _margin_score(margin_ratio), "light": _sub_light(_margin_score(margin_ratio)),
+                                 "value": margin_ratio},
             },
         }
 
@@ -191,9 +233,9 @@ def _score_institutional(db: SignalDB, stock_id: str) -> dict:
     else:
         sity_score = 20
 
-    margin_score = 50.0
+    margin_score_val = _margin_score(margin_ratio)
 
-    weighted = foreign_score * 0.40 + sity_score * 0.30 + margin_score * 0.30
+    weighted = foreign_score * 0.40 + sity_score * 0.30 + margin_score_val * 0.30
     return {
         "score": round(weighted, 2),
         "light": _sub_light(weighted),
@@ -202,10 +244,24 @@ def _score_institutional(db: SignalDB, stock_id: str) -> dict:
                               "value": round(foreign_ratio * 100, 2)},
             "sity_ratio": {"score": sity_score, "light": _sub_light(sity_score),
                            "value": round(sity_ratio * 100, 2)},
-            "margin_ratio": {"score": margin_score, "light": _sub_light(margin_score),
-                             "value": None, "note": "no data"},
+            "margin_ratio": {"score": margin_score_val, "light": _sub_light(margin_score_val),
+                             "value": margin_ratio},
         },
     }
+
+
+def _margin_score(ratio: Optional[float]) -> float:
+    if ratio is None:
+        return 50.0
+    if ratio < 3:
+        return 80
+    if ratio < 8:
+        return 65
+    if ratio < 15:
+        return 50
+    if ratio < 30:
+        return 35
+    return 20
 
 
 def _score_technical(db: SignalDB, stock_id: str) -> dict:

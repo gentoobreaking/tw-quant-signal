@@ -180,6 +180,104 @@ def fetch_valuations(stock_ids: list[str] = None) -> dict[str, dict]:
     return result
 
 
+def _safe_int_stripped(v) -> Optional[int]:
+    if v is None:
+        return None
+    if isinstance(v, str):
+        v = v.replace(",", "")
+    try:
+        return int(float(v))
+    except (ValueError, TypeError):
+        return None
+
+
+def fetch_margin_data(trade_date: str = None) -> dict[str, dict]:
+    """Fetch margin trading data (融資/融券) from TWSE TWT93U.
+
+    Returns dict keyed by stock_id:
+      {stock_id: {"margin_balance": int, "short_balance": int, "margin_ratio": float}}
+    Data is T-1 (previous trading day).
+    """
+    raw = (trade_date or date.today().isoformat()).replace("-", "")
+    url = f"{TWSE_RWD.replace('/rwd/zh', '/zh')}/exchangeReport/TWT93U?date={raw}&response=json"
+    with httpx.Client(timeout=30) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+        payload = resp.json()
+    if payload.get("stat") != "OK":
+        return {}
+    rows = payload.get("data", [])
+    result = {}
+    for r in rows:
+        if len(r) < 15:
+            continue
+        code = r[0].strip()
+        if not code:
+            continue
+        margin_balance = _safe_int_stripped(r[6])  # 今日餘額(融資) in 張
+        short_balance = _safe_int_stripped(r[12])  # 當日餘額(融券) in 股
+        ratio = None
+        if margin_balance and margin_balance > 0 and short_balance is not None:
+            ratio = round(short_balance / (margin_balance * 1000) * 100, 2)
+        result[code] = {
+            "stock_id": code,
+            "trade_date": raw[:4] + "-" + raw[4:6] + "-" + raw[6:8],
+            "margin_balance": margin_balance,
+            "short_balance": short_balance,
+            "margin_ratio": ratio,
+        }
+    return result
+
+
+def fetch_yf_financials(stock_id: str) -> Optional[dict]:
+    """Fetch quarterly financials from yfinance.
+
+    Returns latest available quarter's data:
+      {eps: float, revenue: float, gross_margin: float, fiscal_quarter: str}
+    ETFs (e.g. 0050) return None.
+    """
+    try:
+        import yfinance as yf
+    except ImportError:
+        return None
+    try:
+        ticker = yf.Ticker(f"{stock_id}.TW")
+        fs = ticker.quarterly_financials
+        if fs is None or fs.empty:
+            return None
+        best = None
+        best_score = -1
+        for col in fs.columns:
+            rev = None
+            if "Total Revenue" in fs.index:
+                v = fs.loc["Total Revenue", col]
+                rev = float(v) if not pd.isna(v) else None
+            gp = None
+            if "Gross Profit" in fs.index:
+                v = fs.loc["Gross Profit", col]
+                gp = float(v) if not pd.isna(v) else None
+            eps = None
+            if "Diluted EPS" in fs.index:
+                v = fs.loc["Diluted EPS", col]
+                eps = float(v) if not pd.isna(v) else None
+            score = (1 if rev is not None else 0) + (1 if gp is not None else 0) + (1 if eps is not None else 0)
+            if score > best_score:
+                best_score = score
+                gross_margin = round(gp / rev * 100, 2) if rev and gp and rev > 0 else None
+                best = {
+                    "stock_id": stock_id,
+                    "eps": eps,
+                    "revenue": rev,
+                    "gross_margin": gross_margin,
+                    "fiscal_quarter": str(col)[:7],
+                }
+            if score == 3:
+                break
+        return best
+    except Exception:
+        return None
+
+
 def fetch_historical_index(years: int = 5) -> list[dict]:
     """Fetch historical TAIEX daily data from Yahoo Finance."""
     try:

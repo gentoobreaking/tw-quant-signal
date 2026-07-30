@@ -102,6 +102,25 @@ def _init_schema(conn: sqlite3.Connection):
             PRIMARY KEY (stock_id, trade_date)
         );
 
+        CREATE TABLE IF NOT EXISTS financial_data (
+            stock_id        TEXT NOT NULL,
+            fiscal_quarter  TEXT NOT NULL,
+            eps             REAL,
+            revenue         REAL,
+            gross_margin    REAL,
+            updated_at      TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            PRIMARY KEY (stock_id, fiscal_quarter)
+        );
+
+        CREATE TABLE IF NOT EXISTS margin_data (
+            stock_id        TEXT NOT NULL,
+            trade_date      TEXT NOT NULL,
+            margin_balance  INTEGER,
+            short_balance   INTEGER,
+            margin_ratio    REAL,
+            PRIMARY KEY (stock_id, trade_date)
+        );
+
         CREATE TABLE IF NOT EXISTS health_scores (
             trade_date          TEXT NOT NULL,
             stock_id            TEXT NOT NULL,
@@ -213,6 +232,48 @@ class SignalDB:
                     "INSERT INTO features (trade_date, stock_id, data) VALUES (?, ?, ?)",
                     [trade_date, stock_id, json.dumps(r, ensure_ascii=False)],
                 )
+
+    def upsert_financial_data(self, rows: list[dict]):
+        if not rows:
+            return
+        with self.connect() as conn:
+            for r in rows:
+                conn.execute(
+                    """INSERT OR REPLACE INTO financial_data
+                    (stock_id, fiscal_quarter, eps, revenue, gross_margin)
+                    VALUES (?, ?, ?, ?, ?)""",
+                    [r["stock_id"], r.get("fiscal_quarter"),
+                     r.get("eps"), r.get("revenue"), r.get("gross_margin")],
+                )
+
+    def get_latest_financial_data(self, stock_id: str) -> Optional[dict]:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM financial_data WHERE stock_id=? ORDER BY fiscal_quarter DESC LIMIT 1",
+                [stock_id],
+            ).fetchone()
+            return dict(row) if row else None
+
+    def upsert_margin_data(self, rows: list[dict]):
+        if not rows:
+            return
+        with self.connect() as conn:
+            for r in rows:
+                conn.execute(
+                    """INSERT OR REPLACE INTO margin_data
+                    (stock_id, trade_date, margin_balance, short_balance, margin_ratio)
+                    VALUES (?, ?, ?, ?, ?)""",
+                    [r["stock_id"], r.get("trade_date"),
+                     r.get("margin_balance"), r.get("short_balance"), r.get("margin_ratio")],
+                )
+
+    def get_latest_margin_ratio(self, stock_id: str) -> Optional[float]:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT margin_ratio FROM margin_data WHERE stock_id=? ORDER BY trade_date DESC LIMIT 1",
+                [stock_id],
+            ).fetchone()
+            return row[0] if row else None
 
     def upsert_health_scores(self, rows: list[dict]):
         import json
