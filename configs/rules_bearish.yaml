@@ -1,0 +1,176 @@
+# 偏空規則 (Bearish Signals)
+rules:
+  - id: B001
+    name: "空頭跌破季線 + 外資連續賣超 + 量能放大"
+    type: bearish
+    description: "偏空經典組合：價格跌破季線（MA60）、外資連續 5 日賣超、且成交量放大至 1.3 倍以上"
+    failure_condition: "反彈站回季線且外資轉買，或量能萎縮至均量以下"
+    tags: [trend, volume, institutional]
+    conditions:
+      all:
+        - feature: close_vs_ma60
+          operator: eq
+          value: below
+        - feature: foreign_5d_trend
+          operator: in
+          value: [sell, strong_sell]
+        - feature: volume_ratio
+          operator: gt
+          value: 1.3
+
+  - id: B002
+    name: "空頭跌破月線 + 法人同步賣超"
+    type: bearish
+    description: "短線跌破月線（MA20），且外資與投信同步賣超"
+    failure_condition: "重新站穩月線且法人轉買"
+    tags: [short_term, institutional]
+    conditions:
+      all:
+        - feature: close_vs_ma20
+          operator: eq
+          value: below
+        - feature: foreign_5d_trend
+          operator: in
+          value: [sell, strong_sell]
+        - feature: sity_5d_trend
+          operator: in
+          value: [sell, strong_sell]
+
+  - id: B003
+    name: "高檔過熱 + 外資轉賣"
+    type: bearish
+    description: "RSI 過熱區（≥70）且外資轉為賣超，可能為短線頭部訊號"
+    failure_condition: "RSI 持續創高或外資再度轉買"
+    tags: [reversal, short_term]
+    conditions:
+      all:
+        - feature: rsi_signal
+          operator: in
+          value: [overbought, bullish]
+        - feature: foreign_5d_trend
+          operator: in
+          value: [sell, strong_sell]
+
+  - id: B004
+    name: "大盤跌破月線 + 市場廣度偏弱"
+    type: bearish
+    description: "加權指數跌破月線，且外資買超家數比例低於 50%（廣度不足）"
+    failure_condition: "指數重回月線之上或廣度回升至 50% 以上"
+    tags: [market, breadth]
+    scope: market
+    conditions:
+      all:
+        - feature: index_vs_ma20
+          operator: eq
+          value: below
+        - feature: market_breadth
+          operator: eq
+          value: narrow
+
+  - id: B005
+    name: "估值偏高 + 外資調節"
+    type: bearish
+    description: "本益比與股價淨值比均偏高，且外資開始調節賣出"
+    failure_condition: "獲利成長使估值回歸合理，或外資轉為買超"
+    tags: [valuation, institutional]
+    conditions:
+      all:
+        - feature: pe_signal
+          operator: eq
+          value: high
+        - feature: pb_signal
+          operator: eq
+          value: high
+        - feature: foreign_5d_trend
+          operator: in
+          value: [sell, strong_sell]
+
+  - id: B006
+    name: "放量下跌 + 外資加速出脫"
+    type: bearish
+    description: "成交量放大 1.5 倍以上且價格跌破月線，外資近 5 日大幅賣超"
+    failure_condition: "量能急縮或外資賣壓減緩"
+    tags: [volume, institutional, momentum]
+    conditions:
+      all:
+        - feature: volume_ratio
+          operator: gt
+          value: 1.5
+        - feature: close_vs_ma20
+          operator: eq
+          value: below
+        - feature: foreign_5d_trend
+          operator: in
+          value: [sell, strong_sell]
+
+  - id: B007
+    name: "大盤空頭排列 + 個股弱勢"
+    type: bearish
+    description: "加權指數跌破月線與季線，且個股相對大盤弱勢（beta < 0 且跌破月線）"
+    failure_condition: "大盤站回月線或個股出現止跌訊號"
+    tags: [market, relative_strength]
+    conditions:
+      all:
+        - feature: index_vs_ma20
+          operator: eq
+          value: below
+        - feature: index_vs_ma60
+          operator: eq
+          value: below
+        - feature: close_vs_ma20
+          operator: eq
+          value: below
+        - feature: beta_5d
+          operator: lte
+          value: 0
+
+  - id: B008
+    name: "三大法人同步賣超"
+    type: bearish
+    description: "外資、投信、自營商近 5 日同步賣超，籌碼面全面偏空"
+    failure_condition: "任一法人轉為買超"
+    tags: [institutional, bearish]
+    conditions:
+      all:
+        - feature: foreign_5d_trend
+          operator: in
+          value: [sell, strong_sell]
+        - feature: sity_5d_trend
+          operator: in
+          value: [sell, strong_sell]
+        - feature: dealer_net_1d
+          operator: lt
+          value: -100000
+
+  - id: B009
+    name: "跌破布林下軌 + 量縮"
+    type: bearish
+    description: "價格跌破布林下軌，且成交量萎縮至均量 0.7 倍以下，顯示弱勢無承接"
+    failure_condition: "價格站回布林中軌或量能回升至均量以上"
+    tags: [volatility, volume, bearish]
+    conditions:
+      all:
+        - feature: bb_position
+          operator: eq
+          value: below_lower
+        - feature: volume_ratio
+          operator: lt
+          value: 0.7
+
+  - id: B010
+    name: "連續均線空頭排列"
+    type: bearish
+    description: "MA5 < MA20 < MA60 標準空頭排列，且價格同時跌破月線與季線"
+    failure_condition: "站回月線或 MA5 翻揚突破 MA20"
+    tags: [trend, bearish]
+    conditions:
+      all:
+        - feature: ma_alignment
+          operator: eq
+          value: bearish
+        - feature: close_vs_ma20
+          operator: eq
+          value: below
+        - feature: close_vs_ma60
+          operator: eq
+          value: below

@@ -55,14 +55,36 @@ def _init_schema(conn: sqlite3.Connection):
         );
 
         CREATE TABLE IF NOT EXISTS signals (
-            signal_date  TEXT NOT NULL,
-            stock_id     TEXT NOT NULL DEFAULT '^TWII',
-            signal_type  TEXT NOT NULL,
-            signal_value TEXT NOT NULL,
-            score        REAL,
-            details      TEXT,
-            created_at   TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-            PRIMARY KEY (signal_date, stock_id, signal_type)
+            trade_date   TEXT NOT NULL,
+            stock_id     TEXT NOT NULL,
+            d1_score     INTEGER DEFAULT 0,
+            d1_signal    TEXT,
+            d2_score     INTEGER DEFAULT 0,
+            d2_signal    TEXT,
+            d3_score     INTEGER DEFAULT 0,
+            d3_signal    TEXT,
+            d4_score     INTEGER DEFAULT 0,
+            d4_signal    TEXT,
+            total_score  INTEGER DEFAULT 0,
+            signal       TEXT,
+            PRIMARY KEY (trade_date, stock_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS rule_signals (
+            trade_date      TEXT NOT NULL,
+            stock_id        TEXT NOT NULL,
+            triggered_rules TEXT,
+            triggered_count INTEGER DEFAULT 0,
+            signal          TEXT,
+            total_score     INTEGER DEFAULT 0,
+            PRIMARY KEY (trade_date, stock_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS features (
+            trade_date TEXT NOT NULL,
+            stock_id   TEXT NOT NULL,
+            data       TEXT NOT NULL,
+            PRIMARY KEY (trade_date, stock_id)
         );
 
         CREATE TABLE IF NOT EXISTS tech_indicators (
@@ -157,6 +179,22 @@ class SignalDB:
                      r.get("foreign_investors_net"), r.get("sity_investors_net"),
                      r.get("dealer_net"), r.get("dealer_proprietary_net"),
                      r.get("dealer_hedge_net"), r.get("total_net")],
+                )
+
+    def upsert_features(self, rows: list[dict]):
+        import json
+        if not rows:
+            return
+        with self.connect() as conn:
+            for r in rows:
+                trade_date = r.get("trade_date")
+                stock_id = r.get("stock_id")
+                if not trade_date or not stock_id:
+                    continue
+                conn.execute("DELETE FROM features WHERE trade_date=? AND stock_id=?", [trade_date, stock_id])
+                conn.execute(
+                    "INSERT INTO features (trade_date, stock_id, data) VALUES (?, ?, ?)",
+                    [trade_date, stock_id, json.dumps(r, ensure_ascii=False)],
                 )
 
     def compute_adj_close(self, stock_id: str):

@@ -1,0 +1,176 @@
+# 偏多規則 (Bullish Signals)
+rules:
+  - id: U001
+    name: "多頭站回關鍵均線 + 量能配合"
+    type: bullish
+    description: "價格站回月線與季線之上，MA 多頭排列，且成交量高於 5 日均量"
+    failure_condition: "再次跌破月線或量能急縮至 0.7 倍以下"
+    tags: [trend, volume]
+    conditions:
+      all:
+        - feature: close_vs_ma20
+          operator: eq
+          value: above
+        - feature: close_vs_ma60
+          operator: eq
+          value: above
+        - feature: ma_alignment
+          operator: in
+          value: [bullish, neutral]
+        - feature: volume_ratio
+          operator: gt
+          value: 1.0
+
+  - id: U002
+    name: "外資大舉買超 + 權值止穩"
+    type: bullish
+    description: "外資近 5 日大幅買超，且權值股（2330 台積電）站穩月線"
+    failure_condition: "外資轉向大幅賣超，或權值股跌破前低"
+    tags: [institutional, large_cap]
+    conditions:
+      all:
+        - feature: foreign_5d_trend
+          operator: in
+          value: [buy, strong_buy]
+        - feature: stock_2330_vs_ma20
+          operator: eq
+          value: above
+
+  - id: U003
+    name: "超賣反彈 + 量能放大"
+    type: bullish
+    description: "RSI 超賣區（≤30）且價格位在布林下軌，同時成交量放大（窒息量後出現量能）"
+    failure_condition: "價格繼續破底或 RSI 無法站回 40 以上"
+    tags: [reversal, volume]
+    conditions:
+      all:
+        - feature: rsi_signal
+          operator: eq
+          value: oversold
+        - feature: bb_position
+          operator: in
+          value: [below_lower, below_mid]
+        - feature: volume_ratio
+          operator: gt
+          value: 1.0
+
+  - id: U004
+    name: "大盤多頭排列 + 廣度偏廣"
+    type: bullish
+    description: "加權指數站穩月季線，且外資買超家數超過 50%（市場廣度支持上漲）"
+    failure_condition: "指數跌破月線或廣度低於 40%"
+    tags: [market, trend]
+    scope: market
+    conditions:
+      all:
+        - feature: index_vs_ma20
+          operator: eq
+          value: above
+        - feature: index_vs_ma60
+          operator: eq
+          value: above
+        - feature: market_breadth
+          operator: eq
+          value: broad
+
+  - id: U005
+    name: "外資投信同步買超 + 權值股領漲"
+    type: bullish
+    description: "外資與投信近 5 日同步買超，且權值股台積電站穩月線"
+    failure_condition: "外資或投信轉為賣超，或台積電跌破月線"
+    tags: [institutional, large_cap]
+    conditions:
+      all:
+        - feature: foreign_5d_trend
+          operator: in
+          value: [buy, strong_buy]
+        - feature: sity_5d_trend
+          operator: in
+          value: [buy, strong_buy]
+        - feature: stock_2330_vs_ma20
+          operator: eq
+          value: above
+
+  - id: U006
+    name: "放量突破布林中軌 + 外資買超"
+    type: bullish
+    description: "成交量放大至 1.3 倍以上，價格站回布林中軌，且外資買超"
+    failure_condition: "再度跌破布林中軌或量能萎縮至均量以下"
+    tags: [volume, momentum]
+    conditions:
+      all:
+        - feature: volume_ratio
+          operator: gt
+          value: 1.3
+        - feature: bb_position
+          operator: in
+          value: [above_mid, above_upper]
+        - feature: foreign_5d_trend
+          operator: in
+          value: [buy, strong_buy]
+
+  - id: U007
+    name: "估值偏低 + 法人低接"
+    type: bullish
+    description: "本益比偏低（< 15）且股價淨值比偏低（< 1.5），同時外資或投信買超"
+    failure_condition: "基本面惡化使估值進一步下修，或法人轉賣"
+    tags: [valuation, value_investing]
+    conditions:
+      all:
+        - feature: pe_signal
+          operator: eq
+          value: low
+        - feature: pb_signal
+          operator: eq
+          value: low
+        - feature: foreign_5d_trend
+          operator: in
+          value: [buy, strong_buy]
+
+  - id: U008
+    name: "窒息量止跌 + RSI 超賣"
+    type: bullish
+    description: "成交量萎縮至均量 0.6 倍以下（窒息量），且 RSI 進入超賣區，賣壓竭盡"
+    failure_condition: "持續量縮價跌，或出現更大跌幅"
+    tags: [reversal, volume, exhaustion]
+    conditions:
+      all:
+        - feature: volume_ratio
+          operator: lt
+          value: 0.6
+        - feature: rsi_signal
+          operator: eq
+          value: oversold
+
+  - id: U009
+    name: "大盤止穩 + 個股相對強勢"
+    type: bullish
+    description: "大盤站穩月線，個股 beta > 1 且價格在月線之上（領漲股）"
+    failure_condition: "大盤再次跌破月線或個股轉弱跌破月線"
+    tags: [market, relative_strength, momentum]
+    conditions:
+      all:
+        - feature: index_vs_ma20
+          operator: eq
+          value: above
+        - feature: close_vs_ma20
+          operator: eq
+          value: above
+        - feature: beta_5d
+          operator: gte
+          value: 1
+
+  - id: U010
+    name: "殖利率偏高 + 法人布局"
+    type: bullish
+    description: "現金殖利率 > 5%（高股息防禦標的），且外資近 5 日買超"
+    failure_condition: "股價持續下跌使殖利率失真，或法人轉賣"
+    tags: [dividend, defensive, institutional]
+    conditions:
+      all:
+        - feature: dy_signal
+          operator: eq
+          value: high
+        - feature: foreign_5d_trend
+          operator: in
+          value: [buy, strong_buy]

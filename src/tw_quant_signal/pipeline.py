@@ -3,7 +3,8 @@ from datetime import date, datetime
 
 from tw_quant_signal.db import SignalDB
 from tw_quant_signal.ingestion import IngestionEngine
-from tw_quant_signal.alerter import send_health_alert
+from tw_quant_signal.rules import compute_rule_signals, store_rule_signals, _aggregate_rules
+from tw_quant_signal.alerter import send_health_alert, send_rules_report
 
 
 def _gather_report_data(db):
@@ -63,9 +64,19 @@ def main():
         print(f"  [{icon}] {k}: {v}")
 
     all_ok = all(v == "ok" for v in status.values())
-    db.log_pipeline(run_date, "pipeline", "ok" if all_ok else "partial",
+    db.log_pipeline(run_date, "pipeline", "ok" if all_ok else "fail",
                     f"index={status['index']},stocks={status['stocks']},"
-                    f"inst={status['institutional']},ind={status['indicators']}")
+                    f"inst={status['institutional']},ind={status['indicators']},"
+                    f"features={status['features']}")
+
+    rules_result = compute_rule_signals(db, run_date)
+    triggered_total = sum(r["triggered_count"] for r in rules_result)
+    if rules_result:
+        store_rule_signals(db, rules_result)
+        print(f"  → {len(rules_result)} 筆規則訊號 ({triggered_total} 條觸發)")
+        send_rules_report(rules_result)
+    else:
+        print("  ⚠ 無規則訊號產出")
 
     report_data = _gather_report_data(db)
     send_health_alert(status, report_data)

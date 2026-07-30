@@ -141,3 +141,67 @@ def build_daily_report(status: dict, report_data: Optional[dict] = None) -> str:
 def send_health_alert(status: dict, report_data: Optional[dict] = None):
     report = build_daily_report(status, report_data)
     return send_alert(report)
+
+
+def build_signals_report(signals: list[dict]) -> str:
+    run_date = date.today()
+    lines = [f"🔦 *四大燈號 — {run_date.month:02d}/{run_date.day:02d}*", ""]
+
+    ICONS = {"bullish": "🟢", "neutral": "🟡", "bearish": "🔴"}
+    LABELS = {"bullish": "偏多", "neutral": "中立", "bearish": "偏空"}
+
+    for row in signals:
+        sid = row["stock_id"]
+        name = STOCK_NAMES.get(sid, sid)
+        total_icon = ICONS.get(row["signal"], "⚪")
+        total_label = LABELS.get(row["signal"], "")
+        lines.append(f"{total_icon} *{sid} {name}*　{total_label} ({row['total_score']:+d})")
+
+        for tag, label in [("D1", "動能"), ("D2", "籌碼"), ("D3", "價值"), ("D4", "大盤")]:
+            k = f"d{tag[-1]}_signal"
+            score_key = f"d{tag[-1]}_score"
+            icon = ICONS.get(row[k], "⚪")
+            lbl = LABELS.get(row[k], "")
+            lines.append(f"  {icon} {tag} {label} {lbl} ({row[score_key]:+d})")
+
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def send_signals_report(signals: list[dict]) -> bool:
+    report = build_signals_report(signals)
+    return send_alert(report)
+
+
+def build_rules_report(rule_results: list[dict]) -> str:
+    run_date = date.today()
+    lines = [f"⚙ *規則引擎 — {run_date.month:02d}/{run_date.day:02d}*", ""]
+    ICONS = {"bullish": "🟢", "neutral": "🟡", "bearish": "🔴"}
+    LABELS = {"bullish": "偏多", "neutral": "中立", "bearish": "偏空"}
+
+    for row in rule_results:
+        sid = row["stock_id"]
+        name = STOCK_NAMES.get(sid, sid)
+        icon = ICONS.get(row["signal"], "⚪")
+        lbl = LABELS.get(row["signal"], "")
+        lines.append(f"{icon} *{sid} {name}*　{lbl} ({row['total_score']:+d})")
+
+        for tr in row.get("triggered_rules", []):
+            t = tr["type"]
+            ticon = ICONS.get(t, "⚪")
+            lines.append(f"  {ticon} {tr['rule_id']} {tr['rule_name']}")
+            if tr.get("failure"):
+                lines.append(f"    📋 失效條件: {tr['failure']}")
+
+        if not row.get("triggered_rules"):
+            lines.append("  ⚪ 無規則觸發")
+
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def send_rules_report(rule_results: list[dict]) -> bool:
+    report = build_rules_report(rule_results)
+    return send_alert(report)

@@ -1,0 +1,157 @@
+# 中性規則 (Neutral Signals)
+rules:
+  - id: N001
+    name: "均線糾結無方向"
+    type: neutral
+    description: "均線排列中性（非多頭也非空頭），且 RSI 亦無明顯方向"
+    failure_condition: "任一方向累積 2 條以上規則觸發"
+    tags: [neutral, consolidation]
+    conditions:
+      all:
+        - feature: ma_alignment
+          operator: eq
+          value: neutral
+        - feature: rsi_signal
+          operator: eq
+          value: neutral
+
+  - id: N002
+    name: "外資買 + 投信賣（法人分歧）"
+    type: neutral
+    description: "外資買超但投信同步賣超，法人看法分歧"
+    failure_condition: "外資或投信其中一方連續 3 日以上主導方向"
+    tags: [institutional, divergence, neutral]
+    conditions:
+      all:
+        - feature: foreign_5d_trend
+          operator: in
+          value: [buy, strong_buy]
+        - feature: sity_5d_trend
+          operator: in
+          value: [sell, strong_sell]
+
+  - id: N003
+    name: "價格突破月線但量能不足"
+    type: neutral
+    description: "價格站回月線之上，但成交量萎縮至均量以下，突破無力"
+    failure_condition: "次日補量上漲，或再次跌破月線"
+    tags: [volume, false_breakout, neutral]
+    conditions:
+      all:
+        - feature: close_vs_ma20
+          operator: eq
+          value: above
+        - feature: volume_ratio
+          operator: lt
+          value: 0.7
+
+  - id: N004
+    name: "價格跌破月線但外資仍買"
+    type: neutral
+    description: "價格跌破月線技術面偏空，但外資仍持續買超，多空交錯"
+    failure_condition: "外資轉賣或價格站回月線"
+    tags: [divergence, institutional, neutral]
+    conditions:
+      all:
+        - feature: close_vs_ma20
+          operator: eq
+          value: below
+        - feature: foreign_5d_trend
+          operator: in
+          value: [buy, strong_buy]
+
+  - id: N005
+    name: "RSI 超賣但外資續賣"
+    type: neutral
+    description: "RSI 已進入超賣區（潛在反彈機會），但外資仍持續賣出，短線多空拉鋸"
+    failure_condition: "RSI 站回 40 以上且外資轉買（偏多），或股價繼續破底（偏空）"
+    tags: [divergence, reversal, neutral]
+    conditions:
+      all:
+        - feature: rsi_signal
+          operator: eq
+          value: oversold
+        - feature: foreign_5d_trend
+          operator: in
+          value: [sell, strong_sell]
+
+  - id: N006
+    name: "大盤盤整 + 個股無方向"
+    type: neutral
+    description: "加權指數在月線附近（未明顯站上或跌破），且個股均線糾結"
+    failure_condition: "大盤明確突破月線或個股均線轉為多頭/空頭排列"
+    tags: [market, consolidation, neutral]
+    conditions:
+      all:
+        - feature: index_vs_ma20
+          operator: eq
+          value: at
+        - feature: ma_alignment
+          operator: eq
+          value: neutral
+
+  - id: N007
+    name: "量能萎縮 + 價格橫盤"
+    type: neutral
+    description: "成交量萎縮至均量 0.7 倍以下，且價格在月線附近 1% 內波動"
+    failure_condition: "量能放大且價格突破月線（偏多），或放量跌破月線（偏空）"
+    tags: [volume, consolidation, neutral]
+    conditions:
+      all:
+        - feature: volume_ratio
+          operator: lt
+          value: 0.7
+        - feature: close_vs_ma20
+          operator: eq
+          value: at
+        - feature: close_vs_ma60
+          operator: eq
+          value: at
+
+  - id: N008
+    name: "外資放假 + 量能冰凍"
+    type: neutral
+    description: "外資近 5 日買賣超方向不明（中性），且量能極度萎縮"
+    failure_condition: "外資恢復方向性操作，或量能回升至均量以上"
+    tags: [institutional, volume, neutral]
+    conditions:
+      all:
+        - feature: foreign_5d_trend
+          operator: eq
+          value: neutral
+        - feature: volume_ratio
+          operator: lt
+          value: 0.7
+
+  - id: N009
+    name: "投信買 + 外資賣（換手震盪）"
+    type: neutral
+    description: "投信買超但外資賣超，內外資換手，短線震盪"
+    failure_condition: "投信連續買超且外資轉買（偏多），或兩者同步賣超（偏空）"
+    tags: [institutional, rotation, neutral]
+    conditions:
+      all:
+        - feature: sity_5d_trend
+          operator: in
+          value: [buy, strong_buy]
+        - feature: foreign_5d_trend
+          operator: in
+          value: [sell, strong_sell]
+
+  - id: N010
+    name: "估值偏高但法人仍買（成長股）"
+    type: neutral
+    description: "本益比偏高顯示昂貴，但外資仍持續買入（以成長預期定價）"
+    failure_condition: "外資轉賣且股價跌破月線（偏空），或營收持續高成長使估值合理化"
+    tags: [valuation, growth, neutral]
+    conditions:
+      all:
+        - feature: pe_signal
+          operator: eq
+          value: high
+        - feature: pb_signal
+          operator: eq
+          value: high
+        - feature: foreign_5d_trend
+          operator: in
+          value: [buy, strong_buy]

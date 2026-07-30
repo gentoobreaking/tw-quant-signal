@@ -4,6 +4,7 @@ import time
 from datetime import date, datetime, timedelta
 from typing import Optional
 
+import pandas as pd
 import httpx
 
 from tw_quant_signal.config import settings
@@ -147,6 +148,60 @@ def fetch_institutional_flows(trade_date: Optional[str] = None) -> list[dict]:
             "total_net": _safe_int(row[18].replace(",", "")),
         })
     return results
+
+
+def fetch_valuations(stock_ids: list[str] = None) -> dict[str, dict]:
+    """Fetch PE, PB, dividend yield from TWSE BWIBBU_ALL."""
+    url = f"{TWSE_OPENAPI}/exchangeReport/BWIBBU_ALL"
+    with httpx.Client(timeout=30) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+        rows = resp.json()
+    result = {}
+    for r in rows:
+        code = r.get("Code", "")
+        date_str = r.get("Date", "")
+        if not code or not date_str:
+            continue
+        try:
+            trade_date = _roc_to_ad(date_str)
+        except (ValueError, IndexError):
+            continue
+        if stock_ids and code not in stock_ids:
+            continue
+        dy = _safe_float(r.get("DividendYield"))
+        result[code] = {
+            "stock_id": code,
+            "trade_date": trade_date,
+            "pe_ratio": _safe_float(r.get("PEratio")),
+            "pb_ratio": _safe_float(r.get("PBratio")),
+            "dividend_yield": dy / 100 if dy else None,
+        }
+    return result
+
+
+def fetch_historical_index(years: int = 5) -> list[dict]:
+    """Fetch historical TAIEX daily data from Yahoo Finance."""
+    try:
+        import yfinance as yf
+    except ImportError:
+        return []
+    end = date.today()
+    start = end - timedelta(days=years * 365)
+    ticker = yf.Ticker("^TWII")
+    df = ticker.history(start=start.isoformat(), end=end.isoformat())
+    if df.empty:
+        return []
+    rows = []
+    for dt_idx, row in df.iterrows():
+        trade_date = dt_idx.strftime("%Y-%m-%d") if hasattr(dt_idx, "strftime") else str(dt_idx)[:10]
+        close = float(row["Close"]) if pd.notna(row["Close"]) else None
+        rows.append({
+            "trade_date": trade_date,
+            "close": close,
+            "change_pct": None,
+        })
+    return rows
 
 
 def fetch_historical_daily_prices(stock_id: str, start_date: str, end_date: str) -> list[dict]:

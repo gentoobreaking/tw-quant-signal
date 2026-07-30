@@ -10,6 +10,7 @@ from tw_quant_signal.twse_client import (
     WATCH_STOCKS,
 )
 from tw_quant_signal.indicators import compute_indicators
+from tw_quant_signal.features import compute_all_features
 
 
 class IngestionEngine:
@@ -18,12 +19,13 @@ class IngestionEngine:
 
     def run_daily(self, run_date: str = None) -> dict:
         run_date = run_date or date.today().isoformat()
-        results = {"index": "skip", "stocks": "skip", "institutional": "skip", "indicators": "skip"}
+        results = {"index": "skip", "stocks": "skip", "institutional": "skip", "indicators": "skip", "features": "skip"}
 
         results["index"] = self._ingest_index(run_date)
         results["stocks"] = self._ingest_watch_stocks(run_date)
         results["institutional"] = self._ingest_institutional(run_date)
         results["indicators"] = self._ingest_indicators()
+        results["features"] = self._ingest_features()
         return results
 
     def backfill_prices(self, stock_id: str, start_date: str, end_date: str = None) -> int:
@@ -89,4 +91,16 @@ class IngestionEngine:
             return "ok"
         except Exception as e:
             self.db.log_pipeline(today, "tech_indicators", "fail", str(e))
+            return "fail"
+
+    def _ingest_features(self) -> str:
+        today = date.today().isoformat()
+        try:
+            features = compute_all_features(self.db)
+            if features:
+                self.db.upsert_features(features)
+            self.db.log_pipeline(today, "features", "ok", f"count={len(features)}")
+            return "ok"
+        except Exception as e:
+            self.db.log_pipeline(today, "features", "fail", str(e))
             return "fail"
