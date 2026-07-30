@@ -6,3 +6,9 @@ data/logs/
 *.egg-info/
 .Python
 data/reports/
+
+# 資料庫（透過 backfill 重建）
+data/signal.db
+data/signal.db-wal
+data/signal.db-shm
+data/reports/
