@@ -8,6 +8,14 @@ import yaml
 
 from tw_quant_signal.db import SignalDB
 from tw_quant_signal.twse_client import WATCH_STOCKS
+from tw_quant_signal.market_state import detect_market_state
+
+STATE_WEIGHTS = {
+    "bull": {"bullish": 1.5, "bearish": 1.0, "neutral": 1.0},
+    "bear": {"bullish": 1.0, "bearish": 1.5, "neutral": 1.0},
+    "range": {"bullish": 1.0, "bearish": 1.0, "neutral": 1.0},
+    "unknown": {"bullish": 1.0, "bearish": 1.0, "neutral": 1.0},
+}
 
 
 def _load_rules() -> list[dict]:
@@ -109,6 +117,8 @@ def compute_rule_signals(db: SignalDB, trade_date: str | None = None) -> list[di
     index_feat = features.get("^TWII", {})
     breadth_feat = features.get("BREADTH", {})
 
+    market_state = detect_market_state(db, trade_date)["state"]
+
     results = []
     for sid in WATCH_STOCKS:
         stock_feat = features.get(sid, {})
@@ -126,7 +136,7 @@ def compute_rule_signals(db: SignalDB, trade_date: str | None = None) -> list[di
                     "failure": rule.get("failure_condition", ""),
                 })
 
-        agg_signal, agg_score = _aggregate_rules(triggered)
+        agg_signal, agg_score = _aggregate_rules(triggered, market_state)
 
         results.append({
             "stock_id": sid,
@@ -140,19 +150,24 @@ def compute_rule_signals(db: SignalDB, trade_date: str | None = None) -> list[di
     return results
 
 
-def _aggregate_rules(triggered: list[dict]) -> tuple[str, int]:
-    score = 0
+def _aggregate_rules(triggered: list[dict], market_state: str = "range") -> tuple[str, int]:
+    weights = STATE_WEIGHTS.get(market_state, STATE_WEIGHTS["range"])
+    score = 0.0
     for r in triggered:
         t = r["type"]
+        w = weights.get(t, 1.0)
         if t == "bearish":
-            score -= 1
+            score -= 1 * w
         elif t == "bullish":
-            score += 1
-    if score > 0:
-        return "bullish", score
-    if score < 0:
-        return "bearish", score
-    return "neutral", score
+            score += 1 * w
+        else:
+            score += 0
+    score_int = int(round(score))
+    if score_int > 0:
+        return "bullish", score_int
+    if score_int < 0:
+        return "bearish", score_int
+    return "neutral", score_int
 
 
 def store_rule_signals(db: SignalDB, signals: list[dict]):

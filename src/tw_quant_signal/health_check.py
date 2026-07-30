@@ -8,6 +8,7 @@ from tw_quant_signal.db import SignalDB
 from tw_quant_signal.twse_client import (
     WATCH_STOCKS, fetch_valuations, fetch_margin_data, fetch_yf_financials,
 )
+from tw_quant_signal.market_state import detect_market_state
 
 LIGHT_GREEN = "🟢"
 LIGHT_YELLOW_GREEN = "🟢🔴"
@@ -381,6 +382,7 @@ def _score_valuation(db: SignalDB, stock_id: str) -> dict:
 
 def compute_health_check(db: SignalDB, trade_date: Optional[str] = None) -> list[dict]:
     trade_date = trade_date or date.today().isoformat()
+    mstate = detect_market_state(db, trade_date)["state"]
     results = []
     for sid in WATCH_STOCKS:
         fundamental = _score_fundamental(db, sid)
@@ -390,6 +392,10 @@ def compute_health_check(db: SignalDB, trade_date: Optional[str] = None) -> list
 
         total = (fundamental["score"] * 0.25 + institutional["score"] * 0.25 +
                  technical["score"] * 0.25 + valuation["score"] * 0.25)
+        if mstate == "bull":
+            total = total * 0.9 + max(total, fundamental["score"]) * 0.1
+        elif mstate == "bear":
+            total = total * 0.9 + max(total, valuation["score"]) * 0.1
 
         results.append({
             "stock_id": sid,

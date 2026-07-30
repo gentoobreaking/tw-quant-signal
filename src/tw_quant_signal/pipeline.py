@@ -8,6 +8,7 @@ from tw_quant_signal.rules import compute_rule_signals, store_rule_signals, _agg
 from tw_quant_signal.alerter import send_alert, send_rules_report, send_health_check_report, build_daily_report
 from tw_quant_signal.reporter import generate_markdown_report, generate_csv_report
 from tw_quant_signal.health_check import compute_health_check
+from tw_quant_signal.market_state import detect_market_state, LABELS as STATE_LABELS
 
 
 def _gather_report_data(db):
@@ -82,6 +83,18 @@ def main():
         status["health_check"] = "fail"
 
     all_ok = all(v == "ok" for v in status.values())
+
+    # Market state detection
+    try:
+        mstate = detect_market_state(db, run_date)
+        state_label = STATE_LABELS.get(mstate["state"], mstate["state"])
+        print(f"  → 市場狀態: {state_label} (收盤 {mstate['close']} MA60 {mstate['ma60']} RSI {mstate['rsi14']})")
+        status["market_state"] = "ok"
+        db.log_pipeline(run_date, "market_state", "ok",
+                        f"state={mstate['state']},close={mstate['close']},ma60={mstate['ma60']},rsi={mstate['rsi14']}")
+    except Exception as e:
+        print(f"  ✗ 市場狀態偵測失敗: {e}")
+        status["market_state"] = "fail"
 
     # Anomaly detection
     anomalies = []

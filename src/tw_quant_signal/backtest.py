@@ -289,7 +289,7 @@ def run_backtest(
     dates = _dates_in_range(db, start, end)
     rule_ids = [r["id"] for r in rules]
 
-    stats = {rid: {"id": rid, "name": r["name"], "type": r["type"], "triggers": 0, "wins": 0, "losses": 0, "returns": [], "drawdowns": [], "by_state": {"bull": 0, "bear": 0, "range": 0}, "states_triggered": []} for rid, r in zip(rule_ids, rules)}
+    stats = {rid: {"id": rid, "name": r["name"], "type": r["type"], "triggers": 0, "wins": 0, "losses": 0, "returns": [], "drawdowns": [], "by_state": {"bull": 0, "bear": 0, "range": 0}, "states_triggered": [], "returns_by_state": {"bull": [], "bear": [], "range": []}} for rid, r in zip(rule_ids, rules)}
     tested_count = 0
 
     print(f"Backtest: {len(dates)} days, {len(rules)} rules, {forward_days}d forward")
@@ -338,6 +338,7 @@ def run_backtest(
                     if fwd_ret is not None:
                         net = cost_model.net_return(fwd_ret)
                         s["returns"].append(net)
+                        s["returns_by_state"][mstate].append(net)
                         if net > 0:
                             s["wins"] += 1
                         else:
@@ -381,6 +382,11 @@ def _compute_stats(stats: dict, rules: list[dict], total_tested: int) -> list[di
             else:
                 cons_loss = 0
 
+        state_wr = {}
+        for state in ["bull", "bear", "range"]:
+            rtr = s["returns_by_state"].get(state, [])
+            state_wr[state] = round(sum(1 for r in rtr if r > 0) / len(rtr), 4) if rtr else 0
+
         results.append({
             "rule_id": rule["id"],
             "rule_name": rule["name"],
@@ -395,15 +401,17 @@ def _compute_stats(stats: dict, rules: list[dict], total_tested: int) -> list[di
             "max_drawdown": max_dd,
             "max_consecutive_losses": max_cons_loss,
             "by_state": s["by_state"],
+            "state_win_rate": state_wr,
             "total_rules_tested": total_tested,
         })
     return results
 
 
 def print_report(results: list[dict]):
-    print("=" * 90)
-    print(f"{'ID':<6} {'Type':<8} {'Triggers':<9} {'WinRate':<8} {'AvgRet':<8} {'ProfitR':<8} {'MaxDD':<8} {'MaxConsLoss':<11} Name")
-    print("-" * 90)
+    print("=" * 110)
+    hdr = f"{'ID':<6} {'Type':<8} {'Triggers':<9} {'WinRate':<8} {'AvgRet':<8} {'ProfitR':<8} {'MaxDD':<8} {'BullWR':<8} {'BearWR':<8} {'RangeWR':<8} Name"
+    print(hdr)
+    print("-" * 110)
     for r in sorted(results, key=lambda x: x["triggers"], reverse=True):
         rid = r["rule_id"]
         t = r["type"]
@@ -412,11 +420,14 @@ def print_report(results: list[dict]):
         ar = f"{r['avg_return']:.2%}" if r["avg_return"] else "-"
         pr = f"{r['profit_ratio']:.2f}" if r["profit_ratio"] else "-"
         dd = f"{r['max_drawdown']:.2%}" if r["max_drawdown"] else "-"
-        cl = str(r["max_consecutive_losses"]) if r["max_consecutive_losses"] else "-"
+        swr = r.get("state_win_rate", {})
+        bwr = f"{swr.get('bull',0):.1%}" if swr.get("bull") else "-"
+        bewr = f"{swr.get('bear',0):.1%}" if swr.get("bear") else "-"
+        rwr = f"{swr.get('range',0):.1%}" if swr.get("range") else "-"
         name = r["rule_name"][:45]
-        print(f"{rid:<6} {t:<8} {trig:<9} {wr:<8} {ar:<8} {pr:<8} {dd:<8} {cl:<11} {name}")
+        print(f"{rid:<6} {t:<8} {trig:<9} {wr:<8} {ar:<8} {pr:<8} {dd:<8} {bwr:<8} {bewr:<8} {rwr:<8} {name}")
 
-    print("=" * 90)
+    print("=" * 110)
     print(f"Total rules tested (including repeats): {results[0]['total_rules_tested'] if results else 0}")
 
     # by state summary
