@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import HealthCheckCard from '../components/HealthCheckCard'
 import RiskCard from '../components/RiskCard'
 import PriceChart from '../components/PriceChart'
+import DashboardCharts from '../components/DashboardCharts'
 import type { StockDetail } from '../types'
 
 const STATE_LABEL: Record<string, string> = {
@@ -139,6 +140,8 @@ export default function StockObservation() {
 
   return (
     <div>
+      <DashboardCharts />
+
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
         {(stocks || []).map(s => {
           const isActive = selected === s.id
