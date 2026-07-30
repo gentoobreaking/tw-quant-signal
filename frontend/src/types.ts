@@ -93,6 +93,7 @@ export interface StockDetail {
   financials: FinancialQuarter[]
   health: HealthScore | null
   weekly_health: HealthScore | null
+  monthly_health: HealthScore | null
   risk: RiskMetric | null
   signals: Array<{ triggered_rules: string }>
   market_state: MarketState | null

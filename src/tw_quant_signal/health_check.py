@@ -602,18 +602,178 @@ def _get_latest_weekly_indicators(db: SignalDB, stock_id: str) -> Optional[dict]
         return dict(zip(keys, row))
 
 
+def _get_latest_monthly_indicators(db: SignalDB, stock_id: str) -> Optional[dict]:
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT ma3, ma6, ma12, rsi9, bb_upper, bb_middle, bb_lower, "
+            "volume_ma3, volume_ma6 FROM monthly_indicators "
+            "WHERE stock_id=? ORDER BY trade_date DESC LIMIT 1",
+            [stock_id],
+        ).fetchone()
+        if not row:
+            return None
+        keys = ["ma3", "ma6", "ma12", "rsi9", "bb_upper", "bb_middle", "bb_lower",
+                "volume_ma3", "volume_ma6"]
+        return dict(zip(keys, row))
+
+
 def compute_health_check_weekly(db: SignalDB, trade_date: Optional[str] = None) -> list[dict]:
     """Weekly-level health check using weekly indicators. Same scoring logic as daily."""
     trade_date = trade_date or date.today().isoformat()
     results = []
     for sid in WATCH_STOCKS:
-        # Fundamental uses same yfinance data (quarterly, same across timeframes)
         fundamental = _score_fundamental(db, sid)
-        # Institutional same data source
         institutional = _score_institutional(db, sid)
-        # Technical uses weekly indicators
         technical = _score_technical(db, sid, weekly=True)
-        # Valuation uses same features
+        valuation = _score_valuation(db, sid)
+
+        total = (fundamental["score"] * 0.25 + institutional["score"] * 0.25 +
+                 technical["score"] * 0.25 + valuation["score"] * 0.25)
+
+        results.append({
+            "stock_id": sid,
+            "trade_date": trade_date,
+            "fundamental_score": fundamental["score"],
+            "fundamental_light": fundamental["light"],
+            "institutional_score": institutional["score"],
+            "institutional_light": institutional["light"],
+            "technical_score": technical["score"],
+            "technical_light": technical["light"],
+            "valuation_score": valuation["score"],
+            "valuation_light": valuation["light"],
+            "total_score": round(total, 2),
+            "total_light": _total_light(total),
+            "details": {
+                "fundamental": fundamental,
+                "institutional": institutional,
+                "technical": technical,
+                "valuation": valuation,
+            },
+        })
+    return results
+
+
+def _score_technical_monthly(db: SignalDB, stock_id: str) -> dict:
+    """Monthly-level technical scoring using monthly indicators.
+
+    Uses MA3 (3 months), MA6 (6 months), MA12 (12 months) for alignment,
+    RSI(9) for monthly momentum, BB(6) for position.
+    """
+    ind = _get_latest_monthly_indicators(db, stock_id)
+    if not ind:
+        return {"score": 50.0, "light": LIGHT_YELLOW, "sub": {}}
+
+    ma3 = _safe(ind.get("ma3"))
+    ma6 = _safe(ind.get("ma6"))
+    ma12 = _safe(ind.get("ma12"))
+    if ma3 is not None and ma6 is not None and ma12 is not None:
+        if ma3 > ma6 > ma12:
+            ma_align = "bullish"
+        elif ma3 < ma6 < ma12:
+            ma_align = "bearish"
+        else:
+            ma_align = "neutral"
+    else:
+        ma_align = "neutral"
+
+    close = _safe(ind.get("close"))
+    bb_lower = _safe(ind.get("bb_lower"))
+    bb_upper = _safe(ind.get("bb_upper"))
+    bb_mid = _safe(ind.get("bb_middle"))
+    if close is not None and bb_lower is not None and bb_mid is not None and bb_upper is not None:
+        if close >= bb_upper:
+            bb_pos = "above_upper"
+        elif close <= bb_lower:
+            bb_pos = "below_lower"
+        elif close >= bb_mid:
+            bb_pos = "above_mid"
+        else:
+            bb_pos = "below_mid"
+    else:
+        bb_pos = "mid"
+
+    if ma_align == "bullish":
+        ma_score = 85
+    elif ma_align == "bearish":
+        ma_score = 20
+    else:
+        ma_score = 50
+
+    rsi = _safe(ind.get("rsi9"))
+    if rsi is not None:
+        if rsi <= 25:
+            rsi_score = 90
+        elif rsi <= 35:
+            rsi_score = 75
+        elif rsi <= 45:
+            rsi_score = 45
+        elif rsi <= 55:
+            rsi_score = 55
+        elif rsi <= 65:
+            rsi_score = 65
+        elif rsi <= 75:
+            rsi_score = 35
+        else:
+            rsi_score = 15
+    else:
+        rsi_score = 50
+
+    if bb_pos == "below_lower":
+        bb_score = 85
+    elif bb_pos == "below_mid":
+        bb_score = 40
+    elif bb_pos in ("above_mid", "mid"):
+        bb_score = 60
+    elif bb_pos == "above_upper":
+        bb_score = 25
+    else:
+        bb_score = 50
+
+    weighted = ma_score * 0.40 + rsi_score * 0.30 + bb_score * 0.30
+    return {
+        "score": round(weighted, 2),
+        "light": _sub_light(weighted),
+        "sub": {
+            "ma_alignment": {
+                "score": ma_score, "light": _sub_light(ma_score),
+                "value": ma_align,
+                "inputs": {
+                    "ma3": round(_safe(ind.get("ma3")), 2) if ind.get("ma3") else None,
+                    "ma6": round(_safe(ind.get("ma6")), 2) if ind.get("ma6") else None,
+                    "ma12": round(_safe(ind.get("ma12")), 2) if ind.get("ma12") else None,
+                },
+            },
+            "rsi9": {
+                "score": rsi_score, "light": _sub_light(rsi_score),
+                "value": rsi,
+                "inputs": {"rsi9": rsi} if rsi is not None else None,
+            },
+            "bb_position": {
+                "score": bb_score, "light": _sub_light(bb_score),
+                "value": bb_pos,
+                "inputs": {
+                    "close": round(close, 2) if close is not None else None,
+                    "bb_upper": round(bb_upper, 2) if bb_upper is not None else None,
+                    "bb_middle": round(bb_mid, 2) if bb_mid is not None else None,
+                    "bb_lower": round(bb_lower, 2) if bb_lower is not None else None,
+                },
+            },
+        },
+    }
+
+
+def compute_health_check_monthly(db: SignalDB, trade_date: Optional[str] = None) -> list[dict]:
+    """Monthly-level health check using monthly indicators.
+
+    Fundametal (quarterly same across timeframes) and institutional (daily) data
+    remain unchanged; technical aspect uses monthly MA3/6/12, BB(6), RSI(9).
+    """
+    trade_date = trade_date or date.today().isoformat()
+    results = []
+    for sid in WATCH_STOCKS:
+        fundamental = _score_fundamental(db, sid)
+        institutional = _score_institutional(db, sid)
+        technical = _score_technical_monthly(db, sid)
         valuation = _score_valuation(db, sid)
 
         total = (fundamental["score"] * 0.25 + institutional["score"] * 0.25 +

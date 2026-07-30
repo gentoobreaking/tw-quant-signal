@@ -7,7 +7,7 @@ from tw_quant_signal.ingestion import IngestionEngine
 from tw_quant_signal.rules import compute_rule_signals, store_rule_signals, _aggregate_rules
 from tw_quant_signal.alerter import send_alert, send_rules_report, send_health_check_report, send_risk_report, build_daily_report
 from tw_quant_signal.reporter import generate_markdown_report, generate_csv_report
-from tw_quant_signal.health_check import compute_health_check, compute_health_check_weekly
+from tw_quant_signal.health_check import compute_health_check, compute_health_check_weekly, compute_health_check_monthly
 from tw_quant_signal.market_state import detect_market_state, LABELS as STATE_LABELS
 from tw_quant_signal.risk_manager import compute_risk_metrics, RISK_LEVELS
 from tw_quant_signal.indicators import compute_weekly_indicators, compute_monthly_indicators
@@ -127,7 +127,36 @@ def main():
         print(f"  ✗ 週線健診失敗: {e}")
         status["weekly_health"] = "fail"
 
-    # Multi-timeframe consensus
+    # Monthly indicators (mid-term extension point)
+    try:
+        for sid in WATCH_STOCKS:
+            prices = db.get_stock_prices(sid, limit=3000)
+            if prices:
+                daily_prices = [dict(p) for p in prices]
+                daily_prices.sort(key=lambda p: p["trade_date"])
+                monthly_ind = compute_monthly_indicators(daily_prices, sid)
+                if monthly_ind:
+                    db.upsert_monthly_indicators(monthly_ind)
+        print(f"  → 月線指標更新 (共 {len(WATCH_STOCKS)} 檔)")
+        status["monthly_indicators"] = "ok"
+    except Exception as e:
+        print(f"  ✗ 月線指標失敗: {e}")
+        status["monthly_indicators"] = "fail"
+
+    # Monthly health check
+    try:
+        monthly_health = compute_health_check_monthly(db, run_date)
+        if monthly_health:
+            db.upsert_monthly_health_scores(monthly_health)
+            print(f"  → {len(monthly_health)} 筆月線健診評分")
+            status["monthly_health"] = "ok"
+        else:
+            status["monthly_health"] = "skip"
+    except Exception as e:
+        print(f"  ✗ 月線健診失敗: {e}")
+        status["monthly_health"] = "fail"
+
+    # Multi-timeframe consensus (daily + weekly; monthly extension point documented)
     try:
         consensus = compute_multi_timeframe(db, run_date)
         if consensus:

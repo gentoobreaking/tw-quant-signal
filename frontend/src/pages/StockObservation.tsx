@@ -54,7 +54,7 @@ function StockDetailView({ stockId }: { stockId: string }) {
 
       {/* Health + Risk */}
       <div className="grid-2">
-        <HealthCheckCard health={data.health} weeklyHealth={data.weekly_health} />
+        <HealthCheckCard health={data.health} weeklyHealth={data.weekly_health} monthlyHealth={data.monthly_health} />
         <RiskCard risk={data.risk} />
       </div>
 

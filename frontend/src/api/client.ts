@@ -19,6 +19,7 @@ export const api = {
   dashboard: () => request<{ stocks: Stock[]; market_state: MarketState | null; report: string }>('/dashboard'),
   healthScores: () => request<HealthScore[]>('/health'),
   weeklyHealth: () => request<HealthScore[]>('/weekly-health'),
+  monthlyHealth: () => request<HealthScore[]>('/monthly-health'),
   multiTimeframe: () => request<MultiTimeframeConsensus[]>('/multi-timeframe'),
   healthCheckConfig: () => request<Record<string, any>>('/health-check-config'),
   updateHealthCheckConfig: (body: Record<string, any>) => request('/health-check-config', { method: 'PUT', body: JSON.stringify(body) }),

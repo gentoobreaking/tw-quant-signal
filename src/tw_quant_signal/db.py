@@ -173,6 +173,23 @@ def _init_schema(conn: sqlite3.Connection):
             PRIMARY KEY (stock_id, trade_date)
         );
 
+        CREATE TABLE IF NOT EXISTS monthly_health_scores (
+            trade_date          TEXT NOT NULL,
+            stock_id            TEXT NOT NULL,
+            fundamental_score   REAL,
+            fundamental_light   TEXT,
+            institutional_score REAL,
+            institutional_light TEXT,
+            technical_score     REAL,
+            technical_light     TEXT,
+            valuation_score     REAL,
+            valuation_light     TEXT,
+            total_score         REAL,
+            total_light         TEXT,
+            details             TEXT,
+            PRIMARY KEY (trade_date, stock_id)
+        );
+
         CREATE TABLE IF NOT EXISTS weekly_health_scores (
             trade_date          TEXT NOT NULL,
             stock_id            TEXT NOT NULL,
@@ -610,6 +627,61 @@ class SignalDB:
                 return None
             keys = ["close", "ma3", "ma6", "ma12", "bb_upper", "bb_middle", "bb_lower", "rsi9", "volume_ma3", "volume_ma6"]
             return dict(zip(keys, row))
+
+    def upsert_monthly_health_scores(self, rows: list[dict]):
+        import json
+        if not rows:
+            return
+        with self.connect() as conn:
+            for r in rows:
+                conn.execute("DELETE FROM monthly_health_scores WHERE trade_date=? AND stock_id=?",
+                             [r["trade_date"], r["stock_id"]])
+                conn.execute(
+                    """INSERT INTO monthly_health_scores
+                    (trade_date, stock_id, fundamental_score, fundamental_light,
+                     institutional_score, institutional_light,
+                     technical_score, technical_light,
+                     valuation_score, valuation_light,
+                     total_score, total_light, details)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [
+                        r["trade_date"], r["stock_id"],
+                        r.get("fundamental_score"), r.get("fundamental_light"),
+                        r.get("institutional_score"), r.get("institutional_light"),
+                        r.get("technical_score"), r.get("technical_light"),
+                        r.get("valuation_score"), r.get("valuation_light"),
+                        r.get("total_score"), r.get("total_light"),
+                        json.dumps(r.get("details", {}), ensure_ascii=False),
+                    ],
+                )
+
+    def get_monthly_health_scores(self, trade_date: str, stock_id: str = None) -> list[dict]:
+        with self.connect() as conn:
+            import json
+            cols = [
+                "stock_id", "fundamental_score", "fundamental_light",
+                "institutional_score", "institutional_light",
+                "technical_score", "technical_light",
+                "valuation_score", "valuation_light",
+                "total_score", "total_light", "details",
+            ]
+            if stock_id:
+                rows = conn.execute(
+                    f"SELECT {','.join(cols)} FROM monthly_health_scores WHERE trade_date=? AND stock_id=?",
+                    [trade_date, stock_id],
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    f"SELECT {','.join(cols)} FROM monthly_health_scores WHERE trade_date=?",
+                    [trade_date],
+                ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(zip(cols, r))
+            if isinstance(d.get("details"), str):
+                d["details"] = json.loads(d["details"])
+            result.append(d)
+        return result
 
     def upsert_multi_timeframe_consensus(self, rows: list[dict]):
         import json

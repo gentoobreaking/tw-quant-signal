@@ -131,6 +131,7 @@ def stock_detail(stock_id: str):
 
     health = db.get_health_scores(today, stock_id)
     weekly_health = db.get_weekly_health_scores(today, stock_id)
+    monthly_health = db.get_monthly_health_scores(today, stock_id)
     risk = db.get_risk_metrics(today, stock_id)
     signals = db.get_rule_signals_for_date(today, stock_id)
     ms = _get_market_state(db, today)
@@ -162,6 +163,7 @@ def stock_detail(stock_id: str):
             ],
             "health": health[0] if health else None,
             "weekly_health": weekly_health[0] if weekly_health else None,
+            "monthly_health": monthly_health[0] if monthly_health else None,
             "risk": risk[0] if risk else None,
             "signals": signals,
             "market_state": ms,
@@ -281,6 +283,14 @@ def weekly_health():
     db = _get_db()
     today = date.today().isoformat()
     rows = db.get_weekly_health_scores(today)
+    return {"data": rows}
+
+
+@app.get("/api/monthly-health")
+def monthly_health():
+    db = _get_db()
+    today = date.today().isoformat()
+    rows = db.get_monthly_health_scores(today)
     return {"data": rows}
 
 
