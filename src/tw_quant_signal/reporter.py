@@ -101,6 +101,35 @@ def generate_markdown_report(db: SignalDB, run_date: str | None = None) -> str:
             )
         md.append("")
 
+    risk_rows = db.get_risk_metrics(run_date)
+    if risk_rows:
+        md.append("## 風險監控")
+        md.append("")
+        LEVEL_NAMES = {"severe": "🔴 嚴重", "warning": "🟠 警告", "caution": "🟡 注意", "normal": "🟢 正常"}
+        for r in risk_rows:
+            sid = r["stock_id"]
+            level = LEVEL_NAMES.get(r["risk_level"], r["risk_level"])
+            md.append(f"### {sid} — {r['risk_score']}分 {level}")
+            cols = []
+            if r.get("vol_ratio") is not None:
+                cols.append(f"波動率 {r['vol_ratio']}x")
+            if r.get("atr_pct") is not None:
+                cols.append(f"ATR {r['atr_pct']:.1%}")
+            if r.get("max_drawdown") is not None:
+                cols.append(f"回撤 {r['max_drawdown']*100:.1f}%")
+            if r.get("signal_conflict"):
+                cols.append("⚡多空衝突")
+            if cols:
+                md.append("- " + " / ".join(cols))
+            sl_parts = []
+            if r.get("stop_loss_atr"):
+                sl_parts.append(f"ATR停損 {r['stop_loss_atr']:.1f}")
+            if r.get("stop_loss_ma"):
+                sl_parts.append(f"MA停損 {r['stop_loss_ma']:.1f}")
+            if sl_parts:
+                md.append("- " + " / ".join(sl_parts))
+        md.append("")
+
     md.append("## 燈號說明")
     md.append("")
     md.append("### 綜合總分（五級）")

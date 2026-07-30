@@ -226,6 +226,37 @@ def build_rules_report(rule_results: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def build_risk_report(risk_metrics: list[dict]) -> str:
+    run_date = date.today()
+    lines = [f"⚠️ *風險監控 — {run_date.month:02d}/{run_date.day:02d}*", ""]
+    LEVEL_ICON = {"severe": "🔴", "warning": "🟠", "caution": "🟡", "normal": "🟢"}
+    for r in risk_metrics:
+        sid = r["stock_id"]
+        name = STOCK_NAMES.get(sid, sid)
+        icon = LEVEL_ICON.get(r["risk_level"], "⚪")
+        lines.append(f"{icon} *{sid} {name}*　{r['risk_score']}分 {r['risk_level']}")
+        if r.get("vol_ratio"):
+            lines.append(f"  📊 波動率 {r['vol_ratio']}x 均值")
+        if r.get("atr_pct"):
+            lines.append(f"  📐 ATR {r['atr_pct']:.1%}")
+        if r.get("max_drawdown"):
+            pct = r["max_drawdown"] * 100
+            lines.append(f"  📉 回撤 {pct:.1f}%")
+        if r.get("signal_conflict"):
+            lines.append(f"  ⚡ 多空訊號衝突")
+        if r.get("stop_loss_atr"):
+            lines.append(f"  🛑 停損參考(A) {r['stop_loss_atr']:.1f}")
+        if r.get("stop_loss_ma"):
+            lines.append(f"  🛑 停損參考(M) {r['stop_loss_ma']:.1f}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def send_risk_report(risk_metrics: list[dict]) -> bool:
+    report = build_risk_report(risk_metrics)
+    return send_alert(report)
+
+
 def send_rules_report(rule_results: list[dict]) -> bool:
     report = build_rules_report(rule_results)
     return send_alert(report)

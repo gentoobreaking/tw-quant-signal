@@ -57,6 +57,17 @@
 - [x] 異常主動告警（抓取失敗、資料筆數異常）
 - [x] 準時率/完整率目標已定義 (cron + ok/fail ratio)
 
+### Phase 6 — 風險控管 (T008) ✅
+- [x] 波動率計算 (20d std / 60d avg, vol_ratio)
+- [x] ATR 14 日 + ATR%
+- [x] 52 週最大回撤
+- [x] 訊號衝突偵測 (同標的多空同時觸發)
+- [x] 停損參考價位 (ATR 2x / MA 低點)
+- [x] 風險分級 (normal/caution/warning/severe, 0–100)
+- [x] risk_metrics 表記錄至 SQLite
+- [x] Telegram 風險監控推播
+- [x] 日報風險監控章節 (report.md)
+
 ### 待設定
 - [ ] 設定 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` 環境變數啟用 Telegram 推播
 - [ ] 或設定 `DISCORD_WEBHOOK_URL` 啟用 Discord

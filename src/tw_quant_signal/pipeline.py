@@ -5,10 +5,11 @@ from tw_quant_signal.db import SignalDB
 from tw_quant_signal.twse_client import WATCH_STOCKS
 from tw_quant_signal.ingestion import IngestionEngine
 from tw_quant_signal.rules import compute_rule_signals, store_rule_signals, _aggregate_rules
-from tw_quant_signal.alerter import send_alert, send_rules_report, send_health_check_report, build_daily_report
+from tw_quant_signal.alerter import send_alert, send_rules_report, send_health_check_report, send_risk_report, build_daily_report
 from tw_quant_signal.reporter import generate_markdown_report, generate_csv_report
 from tw_quant_signal.health_check import compute_health_check
 from tw_quant_signal.market_state import detect_market_state, LABELS as STATE_LABELS
+from tw_quant_signal.risk_manager import compute_risk_metrics, RISK_LEVELS
 
 
 def _gather_report_data(db):
@@ -94,6 +95,23 @@ def main():
     except Exception as e:
         print(f"  ✗ 健診評分失敗: {e}")
         status["health_check"] = "fail"
+
+    # Risk metrics
+    try:
+        risk_metrics = compute_risk_metrics(db, run_date)
+        if risk_metrics:
+            db.upsert_risk_metrics(risk_metrics)
+            max_risk = max(r["risk_score"] for r in risk_metrics)
+            max_level = next((l for t, k, l in RISK_LEVELS if max_risk >= t), "🟢 正常")
+            print(f"  → {len(risk_metrics)} 筆風險指標 (最高 {max_risk} {max_level})")
+            send_risk_report(risk_metrics)
+            status["risk"] = "ok"
+        else:
+            print("  ⚠ 無風險指標產出")
+            status["risk"] = "skip"
+    except Exception as e:
+        print(f"  ✗ 風險指標失敗: {e}")
+        status["risk"] = "fail"
 
     all_ok = all(v == "ok" for v in status.values())
 

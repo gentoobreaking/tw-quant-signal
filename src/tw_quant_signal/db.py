@@ -121,6 +121,24 @@ def _init_schema(conn: sqlite3.Connection):
             PRIMARY KEY (stock_id, trade_date)
         );
 
+        CREATE TABLE IF NOT EXISTS risk_metrics (
+            trade_date      TEXT NOT NULL,
+            stock_id        TEXT NOT NULL,
+            volatility_20d  REAL,
+            volatility_avg  REAL,
+            vol_ratio       REAL,
+            atr_14d         REAL,
+            atr_pct         REAL,
+            max_drawdown    REAL,
+            signal_conflict INTEGER DEFAULT 0,
+            stop_loss_atr   REAL,
+            stop_loss_ma    REAL,
+            risk_level      TEXT,
+            risk_score      INTEGER DEFAULT 0,
+            details         TEXT,
+            PRIMARY KEY (trade_date, stock_id)
+        );
+
         CREATE TABLE IF NOT EXISTS health_scores (
             trade_date          TEXT NOT NULL,
             stock_id            TEXT NOT NULL,
@@ -274,6 +292,52 @@ class SignalDB:
                 [stock_id],
             ).fetchone()
             return row[0] if row else None
+
+    def upsert_risk_metrics(self, rows: list[dict]):
+        import json
+        if not rows:
+            return
+        with self.connect() as conn:
+            for r in rows:
+                conn.execute("DELETE FROM risk_metrics WHERE trade_date=? AND stock_id=?",
+                             [r["trade_date"], r["stock_id"]])
+                conn.execute(
+                    """INSERT INTO risk_metrics
+                    (trade_date, stock_id, volatility_20d, volatility_avg, vol_ratio,
+                     atr_14d, atr_pct, max_drawdown, signal_conflict,
+                     stop_loss_atr, stop_loss_ma, risk_level, risk_score, details)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [
+                        r["trade_date"], r["stock_id"],
+                        r.get("volatility_20d"), r.get("volatility_avg"), r.get("vol_ratio"),
+                        r.get("atr_14d"), r.get("atr_pct"), r.get("max_drawdown"),
+                        1 if r.get("signal_conflict") else 0,
+                        r.get("stop_loss_atr"), r.get("stop_loss_ma"),
+                        r.get("risk_level"), r.get("risk_score"),
+                        json.dumps(r.get("details", {}), ensure_ascii=False),
+                    ],
+                )
+
+    def get_rule_signals_for_date(self, trade_date: str, stock_id: str) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT triggered_rules FROM rule_signals WHERE trade_date=? AND stock_id=?",
+                [trade_date, stock_id],
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_risk_metrics(self, trade_date: str, stock_id: str = None) -> list[dict]:
+        with self.connect() as conn:
+            if stock_id:
+                rows = conn.execute(
+                    "SELECT * FROM risk_metrics WHERE trade_date=? AND stock_id=?",
+                    [trade_date, stock_id],
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM risk_metrics WHERE trade_date=?", [trade_date]
+                ).fetchall()
+        return [dict(r) for r in rows]
 
     def upsert_health_scores(self, rows: list[dict]):
         import json
