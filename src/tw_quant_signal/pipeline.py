@@ -97,6 +97,7 @@ def main():
         status["health_check"] = "fail"
 
     # Risk metrics
+    risk_metrics = None
     try:
         risk_metrics = compute_risk_metrics(db, run_date)
         if risk_metrics:
@@ -104,7 +105,6 @@ def main():
             max_risk = max(r["risk_score"] for r in risk_metrics)
             max_level = next((l for t, k, l in RISK_LEVELS if max_risk >= t), "🟢 正常")
             print(f"  → {len(risk_metrics)} 筆風險指標 (最高 {max_risk} {max_level})")
-            send_risk_report(risk_metrics)
             status["risk"] = "ok"
         else:
             print("  ⚠ 無風險指標產出")
@@ -161,6 +161,9 @@ def main():
 
     report_data = _gather_report_data(db)
     send_alert(build_daily_report(status, report_data, mstate["state"] if mstate else None))
+
+    if risk_metrics:
+        send_risk_report(risk_metrics)
 
     print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 管線完成")
     return 0 if all_ok else 1
