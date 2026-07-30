@@ -3,8 +3,58 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import type { Rule } from '../types'
 
-const TYPE_MAP: Record<string, Record<string, string>> = {
-  eq: { bullish: '==', bearish: '!=', gt: '>', lt: '<', gte: '>=', lte: '<=', in: '∈' },
+const OP_LABELS: Record<string, string> = {
+  eq: '==', ne: '!=', gt: '>', lt: '<', gte: '>=', lte: '<=', in: '∈',
+}
+
+const KNOWN_FEATURES = [
+  'close_vs_ma20', 'close_vs_ma60', 'ma_alignment',
+  'rsi_signal', 'bb_position', 'volume_ratio',
+  'foreign_5d_trend', 'sity_5d_trend', 'dealer_net_1d',
+  'pe_signal', 'pb_signal', 'dy_signal',
+  'index_vs_ma20', 'index_vs_ma60', 'market_breadth',
+  'beta_5d',
+]
+
+function CondRow({ cond, onChange, onDelete }: {
+  cond: Record<string, any>
+  onChange: (c: Record<string, any>) => void
+  onDelete: () => void
+}) {
+  const valStr = Array.isArray(cond.value) ? cond.value.join(', ') : String(cond.value ?? '')
+
+  return (
+    <div className="form-row" style={{ alignItems: 'center', marginBottom: 6 }}>
+      <div style={{ flex: 2 }}>
+        <input
+          list="feature-list" value={cond.feature || ''}
+          onChange={e => onChange({ ...cond, feature: e.target.value })}
+          placeholder="feature"
+          style={{ fontSize: 12 }}
+        />
+      </div>
+      <div style={{ flex: 1 }}>
+        <select value={cond.operator || 'eq'} onChange={e => onChange({ ...cond, operator: e.target.value })} style={{ fontSize: 12 }}>
+          {Object.entries(OP_LABELS).map(([k, v]) => <option key={k} value={k}>{k} ({v})</option>)}
+        </select>
+      </div>
+      <div style={{ flex: 2 }}>
+        <input
+          value={valStr}
+          onChange={e => {
+            const parts = e.target.value.split(',').map(s => s.trim()).filter(Boolean)
+            onChange({ ...cond, value: parts.length > 1 ? parts : (parts[0] || '') })
+          }}
+          placeholder="value (逗號分隔多值)"
+          style={{ fontSize: 12 }}
+        />
+      </div>
+      <button className="btn btn-sm" onClick={onDelete} style={{ color: 'var(--red)', borderColor: 'transparent', padding: '4px 6px' }}>✕</button>
+      <datalist id="feature-list">
+        {KNOWN_FEATURES.map(f => <option key={f} value={f} />)}
+      </datalist>
+    </div>
+  )
 }
 
 function RuleEditor({ rule, onChange }: { rule: Rule; onChange: (r: Rule) => void }) {
@@ -12,16 +62,26 @@ function RuleEditor({ rule, onChange }: { rule: Rule; onChange: (r: Rule) => voi
 
   const update = (key: string, value: any) => onChange({ ...rule, [key]: value })
 
-  const allConds = (rule.conditions as any)?.all
-  const condEntries = Array.isArray(allConds)
-    ? allConds.map((c: any, i: number) => (
-        <div key={i} className="text-dim" style={{ fontSize: 12, padding: '2px 0' }}>
-          <code style={{ color: 'var(--blue)' }}>{c.feature}</code>
-          {' '}{TYPE_MAP.eq[c.operator] || c.operator}{' '}
-          <code style={{ color: 'var(--orange)' }}>{Array.isArray(c.value) ? c.value.join(', ') : String(c.value)}</code>
-        </div>
-      ))
-    : null
+  const allConds: Record<string, any>[] = Array.isArray((rule.conditions as any)?.all)
+    ? (rule.conditions as any).all
+    : []
+
+  const updateCond = (idx: number, cond: Record<string, any>) => {
+    const copy = [...allConds]
+    copy[idx] = cond
+    update('conditions', { all: copy })
+  }
+  const deleteCond = (idx: number) => {
+    const copy = allConds.filter((_, i) => i !== idx)
+    update('conditions', { all: copy })
+  }
+  const addCond = () => {
+    update('conditions', { all: [...allConds, { feature: '', operator: 'eq', value: '' }] })
+  }
+
+  const condEntries = allConds.map((c, i) => (
+    <CondRow key={i} cond={c} onChange={cond => updateCond(i, cond)} onDelete={() => deleteCond(i)} />
+  ))
 
   return (
     <div className="rule-card" style={{ borderLeft: `3px solid ${rule.type === 'bullish' ? 'var(--green)' : rule.type === 'bearish' ? 'var(--red)' : 'var(--orange)'}` }}>
@@ -66,7 +126,16 @@ function RuleEditor({ rule, onChange }: { rule: Rule; onChange: (r: Rule) => voi
             <input value={rule.tags?.join(', ') || ''} onChange={e => update('tags', e.target.value.split(',').map(t => t.trim()))} />
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-            <label>條件 ({Array.isArray(allConds) ? allConds.length : 0} 條)</label>
+            <div className="flex-between mb-8">
+              <label>條件 ({allConds.length} 條)</label>
+              <button className="btn btn-sm" onClick={addCond}>+ 新增條件</button>
+            </div>
+            <div style={{ display: 'flex', gap: 8, fontSize: 11, color: 'var(--text-dim)', padding: '0 4px', marginBottom: 4 }}>
+              <span style={{ flex: 2 }}>特徵</span>
+              <span style={{ flex: 1 }}>運算</span>
+              <span style={{ flex: 2 }}>值</span>
+              <span style={{ width: 30 }} />
+            </div>
             {condEntries}
           </div>
         </div>
