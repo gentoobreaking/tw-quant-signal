@@ -315,6 +315,14 @@ def stock_institutional_flows(stock_id: str):
     return {"data": rows}
 
 
+@app.get("/api/stocks/{stock_id}/institutional-trades")
+def stock_institutional_trades(stock_id: str):
+    """Alias of /institutional-flows, matching T014-5 task spec naming."""
+    db = _get_db()
+    rows = db.get_institutional_flows(stock_id, limit=60)
+    return {"data": rows}
+
+
 SECTOR_MAP: dict[str, str] = {
     "2330": "半導體",
     "2308": "半導體",
