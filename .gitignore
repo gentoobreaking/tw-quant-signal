@@ -20,5 +20,11 @@ frontend/node_modules/
 frontend/dist/
 frontend/*.tsbuildinfo
 
+# Test / coverage artifacts
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+
 # Docker
 postgres_data/

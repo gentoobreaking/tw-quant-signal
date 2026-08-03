@@ -15,6 +15,7 @@ dependencies = [
 ]
 [project.optional-dependencies]
 backfill = ["yfinance>=0.2.0"]
+test = ["pytest>=7.0", "pytest-cov>=4.0"]
 
 [project.scripts]
 tw-quant-pipeline = "tw_quant_signal.pipeline:main"
