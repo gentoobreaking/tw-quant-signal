@@ -117,3 +117,21 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 
 /* Empty state */
 .empty { text-align: center; padding: 40px; color: var(--text-dim); }
+
+/* T015 Scorecard */
+.scorecard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.scorecard-panel { margin-bottom: 0; }
+.scorecard-title { font-size: 15px; font-weight: 700; }
+.scorecard-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.scorecard-table td { padding: 5px 8px; border-bottom: 1px solid var(--border); }
+.scorecard-category-row td { font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: .4px; padding-top: 10px; background: rgba(255,255,255,.02); }
+.scorecard-category-row td.scorecard-category { border-bottom: none; }
+.scorecard-indicator { text-align: left; }
+.scorecard-check { text-align: right; width: 24px; }
+.match-red { color: var(--red); font-weight: 700; }
+.match-green { color: var(--green); font-weight: 700; }
+.no-match { color: gray; font-weight: 400; }
+
+@media (max-width: 900px) {
+  .scorecard-grid { grid-template-columns: 1fr; }
+}

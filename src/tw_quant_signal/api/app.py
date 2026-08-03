@@ -503,6 +503,49 @@ def dashboard():
     }
 
 
+# ---- T015: 11 大指標計分卡 ----
+
+@app.get("/api/signals/all/scorecard")
+def all_scorecards():
+    """T015: 全標的計分卡一次輸出（最近一筆）。"""
+    db = _get_db()
+    rows = db.get_latest_scorecards(limit=20)
+    out = []
+    for r in rows:
+        out.append({
+            "stock_id": r["stock_id"],
+            "trade_date": r["trade_date"],
+            "bullish": dict(r["bullish_detail"], count=r["bullish_score"], ratio=f"{r['bullish_score']}/11"),
+            "bearish": dict(r["bearish_detail"], count=r["bearish_score"], ratio=f"{r['bearish_score']}/11"),
+        })
+    return {"data": out}
+
+
+@app.get("/api/signals/{stock_id}/scorecard")
+def stock_scorecard(stock_id: str):
+    """T015: 單一標的 11 大指標多空計分卡。
+
+    回傳 bullish / bearish 各 11 項 boolean + count + ratio。
+    """
+    db = _get_db()
+    rows = db.get_latest_scorecards(stock_id=stock_id, limit=1)
+    if not rows:
+        # Fallback: compute on the fly
+        from tw_quant_signal.signal_scorecard import compute_scorecard
+        sc = compute_scorecard(db, stock_id)
+        if not sc.get("trade_date"):
+            return {"data": None, "error": "無資料"}
+        return {"data": sc}
+    r = rows[0]
+    sc = {
+        "stock_id": r["stock_id"],
+        "trade_date": r["trade_date"],
+        "bullish": dict(r["bullish_detail"], count=r["bullish_score"], ratio=f"{r['bullish_score']}/11"),
+        "bearish": dict(r["bearish_detail"], count=r["bearish_score"], ratio=f"{r['bearish_score']}/11"),
+    }
+    return {"data": sc}
+
+
 # ---- Serve frontend ----
 
 if FRONTEND_DIST.exists():

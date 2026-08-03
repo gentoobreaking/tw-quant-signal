@@ -10,6 +10,7 @@ import QuarterlyFinancialsCard from '../components/QuarterlyFinancialsCard'
 import DividendsCard from '../components/DividendsCard'
 import InstitutionalFlowsCard from '../components/InstitutionalFlowsCard'
 import MarginTradingCard from '../components/MarginTradingCard'
+import Scorecard from '../components/Scorecard'
 import type { StockDetail } from '../types'
 
 const STATE_LABEL: Record<string, string> = {
@@ -108,6 +109,9 @@ function StockDetailView({ stockId }: { stockId: string }) {
           </div>
         </div>
       )}
+
+      {/* Scorecard: 11 大指標多空計分卡 */}
+      <Scorecard stockId={stockId} />
 
       {/* Chart */}
       <div className="card">

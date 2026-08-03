@@ -307,6 +307,16 @@ def _init_schema(conn: sqlite3.Connection):
             PRIMARY KEY (stock_id, year_month)
         );
 
+        CREATE TABLE IF NOT EXISTS scorecard (
+            trade_date     TEXT NOT NULL,
+            stock_id       TEXT NOT NULL,
+            bullish_score  INTEGER NOT NULL,
+            bearish_score  INTEGER NOT NULL,
+            bullish_detail TEXT NOT NULL,
+            bearish_detail TEXT NOT NULL,
+            PRIMARY KEY (trade_date, stock_id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_operation_log ON operation_log(log_date, action);
     """)
 
@@ -935,3 +945,70 @@ class SignalDB:
                 [stock_id, limit],
             ).fetchall()
             return [dict(r) for r in rows]
+
+    # ---- Scorecard (T015) ----
+
+    def upsert_scorecard(self, rows: list[dict]):
+        """Upsert scorecard rows.
+
+        Each row: {trade_date, stock_id, bullish_score, bearish_score,
+                   bullish_detail (dict), bearish_detail (dict)}
+        """
+        import json
+        with self.connect() as conn:
+            for r in rows:
+                conn.execute(
+                    """INSERT OR REPLACE INTO scorecard
+                       (trade_date, stock_id, bullish_score, bearish_score, bullish_detail, bearish_detail)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    [r["trade_date"], r["stock_id"], r["bullish_score"], r["bearish_score"],
+                     json.dumps(r["bullish_detail"], ensure_ascii=False),
+                     json.dumps(r["bearish_detail"], ensure_ascii=False)],
+                )
+
+    def get_scorecard(self, trade_date: str, stock_id: str = None) -> list[dict]:
+        import json
+        with self.connect() as conn:
+            if stock_id:
+                rows = conn.execute(
+                    """SELECT * FROM scorecard WHERE trade_date=? AND stock_id=?""",
+                    [trade_date, stock_id],
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT * FROM scorecard WHERE trade_date=? ORDER BY stock_id""",
+                    [trade_date],
+                ).fetchall()
+            out = []
+            for r in rows:
+                out.append({
+                    "trade_date": r[0], "stock_id": r[1],
+                    "bullish_score": r[2], "bearish_score": r[3],
+                    "bullish_detail": json.loads(r[4]),
+                    "bearish_detail": json.loads(r[5]),
+                })
+            return out
+
+    def get_latest_scorecards(self, stock_id: str = None, limit: int = 1) -> list[dict]:
+        """Return most recent scorecard rows (per stock if stock_id given)."""
+        import json
+        with self.connect() as conn:
+            if stock_id:
+                rows = conn.execute(
+                    """SELECT * FROM scorecard WHERE stock_id=? ORDER BY trade_date DESC LIMIT ?""",
+                    [stock_id, limit],
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT * FROM scorecard ORDER BY trade_date DESC LIMIT ?""",
+                    [limit],
+                ).fetchall()
+            out = []
+            for r in rows:
+                out.append({
+                    "trade_date": r[0], "stock_id": r[1],
+                    "bullish_score": r[2], "bearish_score": r[3],
+                    "bullish_detail": json.loads(r[4]),
+                    "bearish_detail": json.loads(r[5]),
+                })
+            return out

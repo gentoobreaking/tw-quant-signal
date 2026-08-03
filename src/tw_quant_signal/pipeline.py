@@ -15,6 +15,7 @@ from tw_quant_signal.market_state import detect_market_state, LABELS as STATE_LA
 from tw_quant_signal.risk_manager import compute_risk_metrics, RISK_LEVELS
 from tw_quant_signal.indicators import compute_weekly_indicators, compute_monthly_indicators
 from tw_quant_signal.multi_timeframe import compute_multi_timeframe
+from tw_quant_signal.signal_scorecard import compute_all_scorecards, build_scorecard_rows, scorecard_to_markdown
 from tw_quant_signal.structural_change import compute_all_drift, store_drift_results, generate_structural_change_report
 from tw_quant_signal.env_manager import is_production_mode, get_summary, filter_rules_for_production
 from tw_quant_signal.operation_log import (
@@ -178,6 +179,22 @@ def main():
     except Exception as e:
         print(f"  ✗ 多時間框架失敗: {e}")
         status["multi_timeframe"] = "fail"
+
+    # Scorecard (T015): 11 大指標多空計分卡
+    scorecard_results = []
+    try:
+        scorecard_results = compute_all_scorecards(db, run_date)
+        if scorecard_results:
+            db.upsert_scorecard(build_scorecard_rows(scorecard_results))
+            for sc in scorecard_results:
+                print(f"  → {sc['stock_id']} 計分卡: 多方 {sc['bullish']['ratio']} / 空方 {sc['bearish']['ratio']}")
+            status["scorecard"] = "ok"
+        else:
+            print("  ⚠ 無計分卡產出")
+            status["scorecard"] = "skip"
+    except Exception as e:
+        print(f"  ✗ 計分卡失敗: {e}")
+        status["scorecard"] = "fail"
 
     # Risk metrics
     risk_metrics = None

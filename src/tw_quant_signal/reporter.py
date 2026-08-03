@@ -130,6 +130,24 @@ def generate_markdown_report(db: SignalDB, run_date: str | None = None) -> str:
                 md.append("- " + " / ".join(sl_parts))
         md.append("")
 
+    # T015: 11 大指標計分卡
+    try:
+        from tw_quant_signal.signal_scorecard import scorecard_to_markdown
+        sc_rows = db.get_latest_scorecards(limit=10)
+        if sc_rows:
+            md.append("## 📊 11 大指標計分卡（x/11）")
+            md.append("")
+            md.append("| 標的 | 多方 | 空方 | 方向 |")
+            md.append("|------|------|------|------|")
+            for sc in sc_rows:
+                b = sc["bullish_score"]
+                s = sc["bearish_score"]
+                direction = "🟢 多方" if b > s else ("🔴 空方" if s > b else "⚪ 中性")
+                md.append(f"| {sc['stock_id']} | {b}/11 | {s}/11 | {direction} |")
+            md.append("")
+    except Exception:
+        pass
+
     md.append("## 燈號說明")
     md.append("")
     md.append("### 綜合總分（五級）")

@@ -111,6 +111,19 @@ export interface MultiTimeframeConsensus {
   details: Record<string, unknown> | null
 }
 
+export interface ScorecardDetail {
+  count: number
+  ratio: string
+  [key: string]: boolean | number | string
+}
+
+export interface Scorecard {
+  stock_id: string
+  trade_date: string | null
+  bullish: ScorecardDetail
+  bearish: ScorecardDetail
+}
+
 export interface Rule {
   _source: string
   id: string

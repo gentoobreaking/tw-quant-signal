@@ -1,4 +1,4 @@
-import type { Stock, StockDetail, MarketState, HealthScore, Rule, MultiTimeframeConsensus } from '../types'
+import type { Stock, StockDetail, MarketState, HealthScore, Rule, MultiTimeframeConsensus, Scorecard } from '../types'
 
 const BASE = '/api'
 
@@ -77,6 +77,8 @@ export const api = {
   institutionalFlows: (id: string) => request<unknown[]>(`/stocks/${id}/institutional-flows`),
   sectorRanking: () => request<SectorRank[]>(`/sector-ranking`),
   stockSectorRanking: (id: string) => request<StockSectorRank>(`/stocks/${id}/sector-ranking`),
+  scorecard: (id: string) => request<Scorecard>(`/signals/${id}/scorecard`),
+  allScorecards: () => request<Scorecard[]>(`/signals/all/scorecard`),
   config: () => request<{ watch_stocks: string[] }>('/config'),
   updateConfig: (body: { watch_stocks?: string[] }) => request('/config', { method: 'PUT', body: JSON.stringify(body) }),
 }
