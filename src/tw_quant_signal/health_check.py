@@ -461,6 +461,9 @@ def _score_technical(db: SignalDB, stock_id: str, weekly: bool = False) -> dict:
         ma_align = feat.get("ma_alignment", "neutral")
         bb_pos = feat.get("bb_position", "above_mid")
         close = _safe(feat.get("close"))
+        bb_lower = _safe(ind.get("bb_lower"))
+        bb_upper = _safe(ind.get("bb_upper"))
+        bb_mid = _safe(ind.get("bb_middle"))
 
     ma_align = ma_align or "neutral"
     if ma_align == "bullish":

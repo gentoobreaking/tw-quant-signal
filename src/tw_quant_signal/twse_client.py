@@ -316,75 +316,109 @@ def fetch_monthly_revenue(stock_id: str, year: int = None, month: int = None) ->
 def fetch_monthly_revenue_batch(stock_id: str, months: int = 36) -> list[dict]:
     """Fetch up to `months` of monthly revenue for a stock, computing mom_change.
 
-    Returns list of dicts sorted by year_month ascending:
-      [{stock_id, year_month, revenue, mom_change, yoy_change}, ...]
+    Uses a persistent session (entry page first to obtain cookies, then ajax POSTs)
+    to avoid MOPS anti-scraping blocks. Returns list of dicts sorted by year_month
+    ascending: [{stock_id, year_month, revenue, mom_change, yoy_change}, ...]
     """
     from bs4 import BeautifulSoup as _BS
     today = date.today()
     results = []
     seen = set()
 
-    for offset in range(months):
-        m = today.month - offset
-        y = today.year
-        while m < 1:
-            m += 12
-            y -= 1
-        roc_year = y - 1911
-        if roc_year < 100:
-            continue
-        key = f"{stock_id}-{y}-{m:02d}"
-        if key in seen:
-            continue
-        seen.add(key)
+    _MOPS_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+        "Referer": "https://mopsov.twse.com.tw/mops/web/t05st10_ifrs",
+    }
+    _MOPS_ENTRY = "https://mopsov.twse.com.tw/mops/web/t05st10_ifrs"
+    _MOPS_AJAX = "https://mopsov.twse.com.tw/mops/web/ajax_t05st10_ifrs"
 
-        url = "https://mopsov.twse.com.tw/mops/web/ajax_t05st10_ifrs"
-        data = {
-            "step": "1", "firstin": "true", "off": "1",
-            "TYPEK": "sii", "year": str(roc_year), "month": f"{m:02d}", "co_id": stock_id,
-        }
-        with httpx.Client(timeout=15) as client:
-            try:
-                resp = client.post(url, data=data)
-                resp.encoding = "utf-8"
-                soup = _BS(resp.text, "html.parser")
-            except Exception:
+    with httpx.Client(timeout=15, follow_redirects=True, headers=_MOPS_HEADERS) as client:
+        # Establish session cookies via entry page (required to avoid security block)
+        try:
+            client.get(_MOPS_ENTRY)
+        except Exception:
+            pass
+        time.sleep(0.6)
+
+        for offset in range(months):
+            m = today.month - offset
+            y = today.year
+            while m < 1:
+                m += 12
+                y -= 1
+            roc_year = y - 1911
+            if roc_year < 100:
+                continue
+            key = f"{stock_id}-{y}-{m:02d}"
+            if key in seen:
+                continue
+            seen.add(key)
+
+            data = {
+                "step": "1", "firstin": "true", "off": "1",
+                "TYPEK": "sii", "year": str(roc_year), "month": f"{m:02d}", "co_id": stock_id,
+            }
+            ok = False
+            for attempt in range(3):
+                try:
+                    resp = client.post(_MOPS_AJAX, data=data)
+                    resp.encoding = "utf-8"
+                    soup = _BS(resp.text, "html.parser")
+                    if "FOR SECURITY REASONS" in resp.text or "安全性考量" in resp.text:
+                        # Anti-scrape block: re-establish session and retry
+                        time.sleep(1.5)
+                        try:
+                            client.get(_MOPS_ENTRY)
+                        except Exception:
+                            pass
+                        time.sleep(1.5)
+                        continue
+                    ok = True
+                    break
+                except Exception:
+                    time.sleep(0.5)
+                    continue
+            if not ok:
                 time.sleep(0.3)
                 continue
 
-        tables = soup.find_all("table")
-        if len(tables) < 4:
+            tables = soup.find_all("table")
+            if len(tables) < 4:
+                time.sleep(0.3)
+                continue
+            trs = tables[3].find_all("tr")
+            if len(trs) < 5:
+                time.sleep(0.3)
+                continue
+
+            def _get_val(row_idx):
+                vals = [c.get_text(strip=True).replace(",", "") for c in trs[row_idx].find_all(["td", "th"])]
+                return vals[-1] if vals else None
+
+            try:
+                revenue = int(_get_val(1))
+                prev_revenue = int(_get_val(2))
+                yoy_pct = float(_get_val(4))
+            except (ValueError, TypeError, IndexError):
+                revenue = None
+                prev_revenue = None
+                yoy_pct = None
+
+            if not revenue:
+                time.sleep(0.3)
+                continue
+
+            results.append({
+                "stock_id": stock_id,
+                "year_month": f"{y}-{m:02d}",
+                "revenue": revenue,
+                "yoy_change": yoy_pct,
+            })
             time.sleep(0.3)
-            continue
-        trs = tables[3].find_all("tr")
-        if len(trs) < 5:
-            time.sleep(0.3)
-            continue
-
-        def _get_val(row_idx):
-            vals = [c.get_text(strip=True).replace(",", "") for c in trs[row_idx].find_all(["td", "th"])]
-            return vals[-1] if vals else None
-
-        try:
-            revenue = int(_get_val(1))
-            prev_revenue = int(_get_val(2))
-            yoy_pct = float(_get_val(4))
-        except (ValueError, TypeError, IndexError):
-            revenue = None
-            prev_revenue = None
-            yoy_pct = None
-
-        if not revenue:
-            time.sleep(0.3)
-            continue
-
-        results.append({
-            "stock_id": stock_id,
-            "year_month": f"{y}-{m:02d}",
-            "revenue": revenue,
-            "yoy_change": yoy_pct,
-        })
-        time.sleep(0.3)
 
     # Sort ascending to compute mom_change
     results.sort(key=lambda r: r["year_month"])
@@ -422,7 +456,10 @@ def fetch_yf_quarterly_financials_batch(stock_id: str, max_quarters: int = 20) -
 
     results = []
     for col in fs.columns:
-        q_label = str(col)[:7]
+        # fiscal_quarter label like "2025Q1"
+        q_ts = pd.Timestamp(col)
+        q_num = (q_ts.month - 1) // 3 + 1
+        q_label = f"{q_ts.year}Q{q_num}"
 
         rev = None
         if "Total Revenue" in fs.index:
@@ -452,12 +489,19 @@ def fetch_yf_quarterly_financials_batch(stock_id: str, max_quarters: int = 20) -
         if bs is not None and not bs.empty and col in bs.columns:
             total_equity = None
             total_assets = None
-            if "Total Stockholder Equity" in bs.index:
-                v = bs.loc["Total Stockholder Equity", col]
-                total_equity = float(v) if not pd.isna(v) else None
-            if "Total Assets" in bs.index:
-                v = bs.loc["Total Assets", col]
-                total_assets = float(v) if not pd.isna(v) else None
+            # yfinance field names vary; try multiple candidates
+            equity_candidates = ["Total Stockholder Equity", "Stockholders Equity", "Common Stock Equity", "Total Equity Gross Minority Interest"]
+            asset_candidates = ["Total Assets"]
+            for c in equity_candidates:
+                if c in bs.index:
+                    v = bs.loc[c, col]
+                    total_equity = float(v) if not pd.isna(v) else None
+                    break
+            for c in asset_candidates:
+                if c in bs.index:
+                    v = bs.loc[c, col]
+                    total_assets = float(v) if not pd.isna(v) else None
+                    break
 
             if net_income and total_equity and total_equity > 0:
                 roe = round(net_income / total_equity * 100, 2)

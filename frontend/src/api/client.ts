@@ -48,6 +48,15 @@ export interface SectorRank {
   members: { stock_id: string; stock_name: string; score: number }[]
 }
 
+export interface StockSectorRank {
+  stock_id: string
+  stock_name: string
+  sector: string | null
+  member_count: number
+  percentiles: { eps: number | null; roe: number | null; roa: number | null }
+  members: { stock_id: string; stock_name: string; eps: number | null; roe: number | null; roa: number | null; fiscal_quarter: string | null }[]
+}
+
 export const api = {
   listStocks: () => request<Stock[]>('/stocks'),
   stockDetail: (id: string) => request<StockDetail>(`/stocks/${id}/detail`),
@@ -67,6 +76,7 @@ export const api = {
   marginTrading: (id: string) => request<unknown[]>(`/stocks/${id}/margin-trading`),
   institutionalFlows: (id: string) => request<unknown[]>(`/stocks/${id}/institutional-flows`),
   sectorRanking: () => request<SectorRank[]>(`/sector-ranking`),
+  stockSectorRanking: (id: string) => request<StockSectorRank>(`/stocks/${id}/sector-ranking`),
   config: () => request<{ watch_stocks: string[] }>('/config'),
   updateConfig: (body: { watch_stocks?: string[] }) => request('/config', { method: 'PUT', body: JSON.stringify(body) }),
 }

@@ -322,6 +322,61 @@ SECTOR_MAP: dict[str, str] = {
 }
 
 
+@app.get("/api/stocks/{stock_id}/sector-ranking")
+def stock_sector_ranking(stock_id: str):
+    """T014-4: return stock's sector and EPS/ROE/ROA percentile within sector.
+
+    Percentile: rank / total * 100, smaller = better (前 N%).
+    """
+    db = _get_db()
+    sector = SECTOR_MAP.get(stock_id)
+    if not sector:
+        return {"data": {"stock_id": stock_id, "stock_name": STOCK_NAMES.get(stock_id, stock_id), "sector": None, "percentiles": {}, "members": []}}
+
+    sector_members = [sid for sid, sec in SECTOR_MAP.items() if sec == sector]
+    latest: dict[str, dict] = {}
+    for sid in sector_members:
+        rows = db.get_quarterly_financials(sid, limit=1)
+        if rows:
+            latest[sid] = rows[0]
+
+    def percentile(metric: str) -> float | None:
+        vals = sorted(r[metric] for r in latest.values() if r.get(metric) is not None)
+        if not vals:
+            return None
+        cur = latest.get(stock_id, {}).get(metric)
+        if cur is None:
+            return None
+        above = sum(1 for v in vals if v > cur)
+        return round(above / len(vals) * 100, 1)
+
+    members = [
+        {
+            "stock_id": sid,
+            "stock_name": STOCK_NAMES.get(sid, sid),
+            "eps": latest[sid].get("eps"),
+            "roe": latest[sid].get("roe"),
+            "roa": latest[sid].get("roa"),
+            "fiscal_quarter": latest[sid].get("fiscal_quarter"),
+        }
+        for sid in latest
+    ]
+    members.sort(key=lambda m: (m["roe"] if m["roe"] is not None else -1e18), reverse=True)
+
+    return {"data": {
+        "stock_id": stock_id,
+        "stock_name": STOCK_NAMES.get(stock_id, stock_id),
+        "sector": sector,
+        "member_count": len(latest),
+        "percentiles": {
+            "eps": percentile("eps"),
+            "roe": percentile("roe"),
+            "roa": percentile("roa"),
+        },
+        "members": members,
+    }}
+
+
 @app.get("/api/sector-ranking")
 def sector_ranking_endpoint():
     """Aggregate health scores by sector and rank."""

@@ -17,7 +17,10 @@ from tw_quant_signal.features import compute_all_features
 
 
 def _fetch_dividends_yf(stock_id: str) -> list[dict]:
-    """Fetch dividend history from yfinance for a Taiwan stock."""
+    """Fetch dividend history from yfinance for a Taiwan stock.
+    
+    Groups dividends by year (to handle quarterly payouts) and returns up to 5 years.
+    """
     try:
         import yfinance as yf
         import pandas as pd
@@ -30,45 +33,59 @@ def _fetch_dividends_yf(stock_id: str) -> list[dict]:
         return []
     if div is None or div.empty:
         return []
+    
+    # Group by year and sum (Taiwan stocks often pay quarterly)
+    div_df = div.reset_index()
+    div_df.columns = ['date', 'amount']
+    div_df['year'] = div_df['date'].dt.year
+    yearly_div = div_df.groupby('year').agg({
+        'amount': 'sum',
+        'date': 'first'  # Use first ex-date of the year
+    }).reset_index()
+    
     results = []
-    price_cache: dict[str, float] = {}
-    for dt_idx, amount in div.items():
-        year = dt_idx.year
-        ex_date = dt_idx.strftime("%Y-%m-%d")
+    for _, row in yearly_div.iterrows():
+        year = int(row['year'])
+        ex_date = row['date'].strftime("%Y-%m-%d")
+        cash_dividend = round(float(row['amount']), 2) if not pd.isna(row['amount']) else None
+        
         cash_yield = None
         close_before = None
-        # Try to get close price before ex-date
+        # Try to get close price before ex-date for yield calculation
         import httpx
         try:
             from datetime import timedelta
-            lookback = (dt_idx - timedelta(days=5)).strftime("%Y%m%d")
+            lookback = (row['date'] - timedelta(days=5)).strftime("%Y%m%d")
             resp = httpx.get(
-                f"https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date={lookback}&stockNo={stock_id.replace('.TW','')}&response=json",
+                f"https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date={lookback}&stockNo={stock_id}&response=json",
                 timeout=10,
             )
             payload = resp.json()
             if payload.get("stat") == "OK":
-                for row in payload.get("data", []):
-                    parts = row[0].split("/")
+                for r in payload.get("data", []):
+                    parts = r[0].split("/")
                     if len(parts) == 3:
                         ad = f"{int(parts[0])+1911}-{parts[1]}-{parts[2]}"
                         if ad == ex_date:
-                            close_before = float(row[6]) if row[6].replace(",", "").replace(".", "", 1).lstrip("-").isdigit() else None
+                            close_before = float(r[6].replace(",", "")) if r[6].replace(",", "").replace(".", "").lstrip("-").isdigit() else None
                             break
-                if close_before and amount:
-                    cash_yield = round(amount / close_before * 100, 2)
+                if close_before and cash_dividend:
+                    cash_yield = round(cash_dividend / close_before * 100, 2)
         except Exception:
             pass
+        
         results.append({
             "stock_id": stock_id,
             "year": year,
             "ex_date": ex_date,
             "close_before_ex": close_before,
-            "cash_dividend": round(float(amount), 2) if not pd.isna(amount) else None,
+            "cash_dividend": cash_dividend,
             "cash_pay_date": None,
             "cash_yield": cash_yield,
             "stock_dividend": None,
         })
+    
+    # Return last 5 years, most recent first
     return sorted(results, key=lambda r: r["year"], reverse=True)[:5]
 
 

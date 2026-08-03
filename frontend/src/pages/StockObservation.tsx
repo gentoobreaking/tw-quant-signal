@@ -176,7 +176,7 @@ function StockDetailView({ stockId }: { stockId: string }) {
 export default function StockObservation({ selectedStockId }: { selectedStockId: string }) {
   return (
     <div>
-      <SectorRankingCard />
+      <SectorRankingCard stockId={selectedStockId} />
       <StockDetailView stockId={selectedStockId} />
     </div>
   )
