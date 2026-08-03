@@ -110,7 +110,8 @@ def compute_rule_signals(db: SignalDB, trade_date: str | None = None) -> list[di
     trade_date = trade_date or date.today().isoformat()
     rules = _load_rules()
 
-    features = _load_features(db)
+    # T016 §1：以指定 trade_date 載入特徵，避免取到最新（可能跨日）特徵造成 stale
+    features = _load_features(db, trade_date=trade_date)
     if not features:
         return []
 
@@ -211,13 +212,27 @@ def compute_rule_stats(db: SignalDB, days: int = 30) -> dict[str, dict]:
     return stats
 
 
-def _load_features(db: SignalDB) -> dict[str, dict]:
+def _load_features(db: SignalDB, trade_date: str | None = None) -> dict[str, dict]:
+    """載入特徵 map（stock_id -> data）。
+
+    T016 §1：以 GROUP BY stock_id + MAX(trade_date) 取每檔最新特徵，並支援
+    trade_date 過濾（<= 指定日），避免一次 ORDER BY 全域排序 + 去重。
+    """
+    params: list = []
+    where = ""
+    if trade_date:
+        where = "WHERE fe.trade_date <= ?"
+        params.append(trade_date)
+    sql = f"""
+        SELECT f.stock_id, f.data
+        FROM features f
+        JOIN (
+            SELECT fe.stock_id, MAX(fe.trade_date) AS max_d
+            FROM features fe
+            {where}
+            GROUP BY fe.stock_id
+        ) g ON g.stock_id = f.stock_id AND f.trade_date = g.max_d
+    """
     with db.connect() as conn:
-        rows = conn.execute(
-            "SELECT stock_id, data FROM features ORDER BY trade_date DESC"
-        ).fetchall()
-    grouped: dict[str, dict] = {}
-    for sid, raw in rows:
-        if sid not in grouped:
-            grouped[sid] = json.loads(raw)
-    return grouped
+        rows = conn.execute(sql, params).fetchall()
+    return {sid: json.loads(raw) for sid, raw in rows}

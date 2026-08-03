@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 import time
@@ -14,6 +15,59 @@ TWSE_RWD = "https://www.twse.com.tw/rwd/zh"
 _ROC_EPOCH = 1911
 
 WATCH_STOCKS = settings.watch_stocks
+
+# HTTP 重試（T016 §5）：max 3 retry、指數 backoff
+RETRY_MAX = 3
+RETRY_BACKOFF_BASE = 0.8
+RETRY_BACKOFF_MAX = 5.0
+_RETRYABLE = (httpx.TimeoutException, httpx.NetworkError, httpx.TransportError, httpx.HTTPStatusError)
+
+
+def _should_retry(exc: Exception) -> bool:
+    """判斷例外是否值得重試（連線/逾時/5xx）。"""
+    if isinstance(exc, httpx.TimeoutException):
+        return True
+    if isinstance(exc, httpx.NetworkError):
+        return True
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+    return False
+
+
+def _backoff_delay(attempt: int) -> float:
+    return min(RETRY_BACKOFF_BASE * (2 ** attempt), RETRY_BACKOFF_MAX)
+
+
+def _retry(fn, *args, retries: int = RETRY_MAX, **kwargs):
+    """同步 HTTP 重試包裝：最多 retries 次，指數 backoff。"""
+    last_exc = None
+    for attempt in range(retries):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - 重試層需攔截所有連線例外
+            last_exc = exc
+            if attempt < retries - 1 and _should_retry(exc):
+                time.sleep(_backoff_delay(attempt))
+                continue
+            raise
+    raise last_exc
+
+
+async def _retry_async(fn, *args, retries: int = RETRY_MAX, **kwargs):
+    """非同步 HTTP 重試包裝：最多 retries 次，指數 backoff。"""
+    last_exc = None
+    for attempt in range(retries):
+        try:
+            return await fn(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if attempt < retries - 1 and _should_retry(exc):
+                await asyncio.sleep(_backoff_delay(attempt))
+                continue
+            raise
+    raise last_exc
 
 
 def _roc_to_ad(roc_date: str) -> str:
@@ -43,12 +97,28 @@ def _safe_int(v) -> Optional[int]:
         return None
 
 
+def _request_json(client: httpx.Client, method: str, url: str, **kwargs) -> dict:
+    """以重試包裝執行 HTTP 請求並回傳 JSON。"""
+    def _do():
+        resp = client.request(method, url, **kwargs)
+        resp.raise_for_status()
+        return resp.json()
+    return _retry(_do)
+
+
+async def _request_json_async(client: httpx.AsyncClient, method: str, url: str, **kwargs) -> dict:
+    """非同步版 _request_json（重試包裝）。"""
+    async def _do():
+        resp = await client.request(method, url, **kwargs)
+        resp.raise_for_status()
+        return resp.json()
+    return await _retry_async(_do)
+
+
 def fetch_daily_prices_all() -> list[dict]:
     url = f"{TWSE_OPENAPI}/exchangeReport/STOCK_DAY_ALL"
     with httpx.Client(timeout=60) as client:
-        resp = client.get(url)
-        resp.raise_for_status()
-        rows = resp.json()
+        rows = _request_json(client, "GET", url)
     results = []
     for r in rows:
         code = r.get("Code", "")
@@ -81,9 +151,7 @@ def fetch_watch_stocks_prices() -> list[dict]:
 def fetch_market_index() -> Optional[dict]:
     url = f"{TWSE_OPENAPI}/exchangeReport/MI_INDEX"
     with httpx.Client(timeout=30) as client:
-        resp = client.get(url)
-        resp.raise_for_status()
-        data = resp.json()
+        data = _request_json(client, "GET", url)
 
     if not isinstance(data, list):
         return None
@@ -118,9 +186,7 @@ def fetch_institutional_flows(trade_date: Optional[str] = None) -> list[dict]:
     _date = raw.replace("-", "")
     url = f"{TWSE_RWD}/fund/T86?date={_date}&selectType=ALLBUT0999"
     with httpx.Client(timeout=60) as client:
-        resp = client.get(url)
-        resp.raise_for_status()
-        payload = resp.json()
+        payload = _request_json(client, "GET", url)
     if payload.get("stat") != "OK":
         return []
     raw_date = payload.get("date", "")
@@ -151,12 +217,13 @@ def fetch_institutional_flows(trade_date: Optional[str] = None) -> list[dict]:
 
 
 def fetch_valuations(stock_ids: list[str] = None) -> dict[str, dict]:
-    """Fetch PE, PB, dividend yield from TWSE BWIBBU_ALL."""
-    url = f"{TWSE_OPENAPI}/exchangeReport/BWIBBU_ALL"
+    """Fetch PE, PB, dividend yield from TWSE BWIBBU_ALL.
+
+    僅回傳指定股票（或全體）之估值，供保留相容性（T016 §2 已將
+    管線內重複呼叫抽至 ingestion 層一次拉取）。
+    """
     with httpx.Client(timeout=30) as client:
-        resp = client.get(url)
-        resp.raise_for_status()
-        rows = resp.json()
+        rows = _request_json(client, "GET", f"{TWSE_OPENAPI}/exchangeReport/BWIBBU_ALL")
     result = {}
     for r in rows:
         code = r.get("Code", "")
@@ -180,6 +247,11 @@ def fetch_valuations(stock_ids: list[str] = None) -> dict[str, dict]:
     return result
 
 
+def fetch_valuations_all() -> dict[str, dict]:
+    """一次拉取全體上市股票估值（T016 §2：消除 per-stock 重複呼叫）。"""
+    return fetch_valuations(stock_ids=None)
+
+
 def _safe_int_stripped(v) -> Optional[int]:
     if v is None:
         return None
@@ -201,9 +273,7 @@ def fetch_margin_data(trade_date: str = None) -> dict[str, dict]:
     raw = (trade_date or date.today().isoformat()).replace("-", "")
     url = f"{TWSE_RWD.replace('/rwd/zh', '/zh')}/exchangeReport/TWT93U?date={raw}&response=json"
     with httpx.Client(timeout=30) as client:
-        resp = client.get(url)
-        resp.raise_for_status()
-        payload = resp.json()
+        payload = _request_json(client, "GET", url)
     if payload.get("stat") != "OK":
         return {}
     rows = payload.get("data", [])
@@ -239,9 +309,7 @@ def fetch_margin_trading_detailed(trade_date: str = None) -> list[dict]:
     raw = (trade_date or date.today().isoformat()).replace("-", "")
     url = f"{TWSE_RWD.replace('/rwd/zh', '/zh')}/exchangeReport/TWT93U?date={raw}&response=json"
     with httpx.Client(timeout=30) as client:
-        resp = client.get(url)
-        resp.raise_for_status()
-        payload = resp.json()
+        payload = _request_json(client, "GET", url)
     if payload.get("stat") != "OK":
         return []
     rows = payload.get("data", [])
@@ -313,112 +381,174 @@ def fetch_monthly_revenue(stock_id: str, year: int = None, month: int = None) ->
     }
 
 
-def fetch_monthly_revenue_batch(stock_id: str, months: int = 36) -> list[dict]:
-    """Fetch up to `months` of monthly revenue for a stock, computing mom_change.
+_MOPS_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+    "Referer": "https://mopsov.twse.com.tw/mops/web/t05st10_ifrs",
+}
+_MOPS_ENTRY = "https://mopsov.twse.com.tw/mops/web/t05st10_ifrs"
+_MOPS_AJAX = "https://mopsov.twse.com.tw/mops/web/ajax_t05st10_ifrs"
+_MOPS_CONCURRENCY = 3  # T016 §3：並行度 3（規範 3–5），單股票批次內併發；不跨股票平行
 
-    Uses a persistent session (entry page first to obtain cookies, then ajax POSTs)
-    to avoid MOPS anti-scraping blocks. Returns list of dicts sorted by year_month
-    ascending: [{stock_id, year_month, revenue, mom_change, yoy_change}, ...]
-    """
-    from bs4 import BeautifulSoup as _BS
-    today = date.today()
-    results = []
+
+def _monthly_rev_months(months: int, ref: date = None) -> list[tuple[int, int, int]]:
+    """回傳 [(roc_year, ad_year, month), ...] 由近至遠，共 months 個月。"""
+    ref = ref or date.today()
+    out = []
     seen = set()
+    for offset in range(months):
+        m = ref.month - offset
+        y = ref.year
+        while m < 1:
+            m += 12
+            y -= 1
+        roc_year = y - 1911
+        if roc_year < 100:
+            continue
+        key = (y, m)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((roc_year, y, m))
+    return out
 
-    _MOPS_HEADERS = {
-        "User-Agent": (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-        ),
-        "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
-        "Referer": "https://mopsov.twse.com.tw/mops/web/t05st10_ifrs",
+
+def _parse_mops_monthly_table(soup) -> Optional[dict]:
+    """從 MOPS 回應解析單月營收（revenue / prev_year_revenue / yoy_pct）。"""
+    tables = soup.find_all("table")
+    if len(tables) < 4:
+        return None
+    trs = tables[3].find_all("tr")
+    if len(trs) < 5:
+        return None
+
+    def _get_val(row_idx):
+        vals = [c.get_text(strip=True).replace(",", "") for c in trs[row_idx].find_all(["td", "th"])]
+        return vals[-1] if vals else None
+
+    try:
+        revenue = int(_get_val(1))
+        prev_revenue = int(_get_val(2))
+        yoy_pct = float(_get_val(4))
+    except (ValueError, TypeError, IndexError):
+        return None
+    if not revenue:
+        return None
+    return {"revenue": revenue, "prev_year_revenue": prev_revenue, "yoy_pct": yoy_pct}
+
+
+async def _fetch_mops_month_async(
+    client: httpx.AsyncClient,
+    stock_id: str,
+    roc_year: int,
+    y: int,
+    m: int,
+) -> Optional[dict]:
+    """非同步抓取單月營收（含防反爬 session 重建重試）。"""
+    from bs4 import BeautifulSoup as _BS
+    data = {
+        "step": "1", "firstin": "true", "off": "1",
+        "TYPEK": "sii", "year": str(roc_year), "month": f"{m:02d}", "co_id": stock_id,
     }
-    _MOPS_ENTRY = "https://mopsov.twse.com.tw/mops/web/t05st10_ifrs"
-    _MOPS_AJAX = "https://mopsov.twse.com.tw/mops/web/ajax_t05st10_ifrs"
 
-    with httpx.Client(timeout=15, follow_redirects=True, headers=_MOPS_HEADERS) as client:
-        # Establish session cookies via entry page (required to avoid security block)
+    async def _do():
+        resp = await client.post(_MOPS_AJAX, data=data)
+        resp.encoding = "utf-8"
+        return resp
+
+    resp = await _retry_async(_do)
+    text = resp.text
+    if "FOR SECURITY REASONS" in text or "安全性考量" in text:
+        # 反爬封鎖：重建 session 後重試一次
         try:
-            client.get(_MOPS_ENTRY)
+            await client.get(_MOPS_ENTRY)
         except Exception:
             pass
-        time.sleep(0.6)
+        await asyncio.sleep(1.5)
+        resp = await _retry_async(_do)
+        text = resp.text
+    # 二次封鎖：再次重建 session（原始同步版亦採多重 session 重建策略）
+    if "FOR SECURITY REASONS" in text or "安全性考量" in text:
+        try:
+            await client.get(_MOPS_ENTRY)
+        except Exception:
+            pass
+        await asyncio.sleep(1.5)
+        resp = await _retry_async(_do)
+        text = resp.text
+    soup = _BS(text, "html.parser")
+    parsed = _parse_mops_monthly_table(soup)
+    if not parsed:
+        return None
+    return {
+        "stock_id": stock_id,
+        "year_month": f"{y}-{m:02d}",
+        "revenue": parsed["revenue"],
+        "yoy_change": parsed["yoy_pct"],
+    }
 
-        for offset in range(months):
-            m = today.month - offset
-            y = today.year
-            while m < 1:
-                m += 12
-                y -= 1
-            roc_year = y - 1911
-            if roc_year < 100:
-                continue
-            key = f"{stock_id}-{y}-{m:02d}"
-            if key in seen:
-                continue
-            seen.add(key)
 
-            data = {
-                "step": "1", "firstin": "true", "off": "1",
-                "TYPEK": "sii", "year": str(roc_year), "month": f"{m:02d}", "co_id": stock_id,
+def fetch_monthly_revenue_batch(stock_id: str, months: int = 36, incremental: bool = False, db=None) -> list[dict]:
+    """Fetch up to `months` of monthly revenue for a stock, computing mom_change.
+
+    T016 §3：以 httpx.AsyncClient 將逐月 sequential 請求改為批量併發
+    （並行度 _MOPS_CONCURRENCY=3，規範 3–5，兼顧速度與 MOPS 反爬耐受度）。
+    使用持久 session（先打 entry 頁取 cookie，再 ajax POST）避免反爬封鎖。
+    incremental=True 時僅抓取 DB 中缺少的月份（回傳 0 個月=資料已最新）。
+    回傳依 year_month 升冪排序之 [{stock_id, year_month, revenue, mom_change, yoy_change}, ...]
+    """
+    today = date.today()
+    months_list = _monthly_rev_months(months, today)
+    if not months_list:
+        return []
+
+    if incremental and db is not None:
+        with db.connect() as conn:
+            existing = {
+                r[0] for r in conn.execute(
+                    "SELECT year_month FROM monthly_revenue WHERE stock_id=?", [stock_id]
+                ).fetchall()
             }
-            ok = False
-            for attempt in range(3):
-                try:
-                    resp = client.post(_MOPS_AJAX, data=data)
-                    resp.encoding = "utf-8"
-                    soup = _BS(resp.text, "html.parser")
-                    if "FOR SECURITY REASONS" in resp.text or "安全性考量" in resp.text:
-                        # Anti-scrape block: re-establish session and retry
-                        time.sleep(1.5)
-                        try:
-                            client.get(_MOPS_ENTRY)
-                        except Exception:
-                            pass
-                        time.sleep(1.5)
-                        continue
-                    ok = True
-                    break
-                except Exception:
-                    time.sleep(0.5)
-                    continue
-            if not ok:
-                time.sleep(0.3)
-                continue
+        # MOPS 每月約 10 日公告上月營收；當月（未結束）與上月（可能未公告）
+        # 不納入增量目標，避免每次運行都對未公告月份發請求
+        pub_cutoff = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        months_list = [
+            (y, yy, m) for (y, yy, m) in months_list
+            if f"{yy}-{m:02d}" not in existing and f"{yy}-{m:02d}" <= pub_cutoff
+        ]
+        if not months_list:
+            return []
 
-            tables = soup.find_all("table")
-            if len(tables) < 4:
-                time.sleep(0.3)
-                continue
-            trs = tables[3].find_all("tr")
-            if len(trs) < 5:
-                time.sleep(0.3)
-                continue
-
-            def _get_val(row_idx):
-                vals = [c.get_text(strip=True).replace(",", "") for c in trs[row_idx].find_all(["td", "th"])]
-                return vals[-1] if vals else None
-
+    async def _run() -> list[dict]:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers=_MOPS_HEADERS) as client:
             try:
-                revenue = int(_get_val(1))
-                prev_revenue = int(_get_val(2))
-                yoy_pct = float(_get_val(4))
-            except (ValueError, TypeError, IndexError):
-                revenue = None
-                prev_revenue = None
-                yoy_pct = None
+                await client.get(_MOPS_ENTRY)
+            except Exception:
+                pass
+            await asyncio.sleep(0.4)
 
-            if not revenue:
-                time.sleep(0.3)
-                continue
+            sem = asyncio.Semaphore(_MOPS_CONCURRENCY)
 
-            results.append({
-                "stock_id": stock_id,
-                "year_month": f"{y}-{m:02d}",
-                "revenue": revenue,
-                "yoy_change": yoy_pct,
-            })
-            time.sleep(0.3)
+            async def _wrapped(roc_year: int, y: int, m: int):
+                async with sem:
+                    return await _fetch_mops_month_async(client, stock_id, roc_year, y, m)
+
+            results = await asyncio.gather(
+                *[_wrapped(roc_year, y, m) for roc_year, y, m in months_list]
+            )
+            return [r for r in results if r]
+
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = None
+    if loop is not None and loop.is_running():
+        results = asyncio.run_coroutine_threadsafe(_run(), loop).result()
+    else:
+        results = asyncio.run(_run())
 
     # Sort ascending to compute mom_change
     results.sort(key=lambda r: r["year_month"])
@@ -428,7 +558,8 @@ def fetch_monthly_revenue_batch(stock_id: str, months: int = 36) -> list[dict]:
             results[i]["mom_change"] = round((results[i]["revenue"] - prev_rev) / prev_rev * 100, 2)
         else:
             results[i]["mom_change"] = None
-    results[0]["mom_change"] = None
+    if results:
+        results[0]["mom_change"] = None
 
     return results
 
@@ -613,9 +744,7 @@ def fetch_historical_daily_prices(stock_id: str, start_date: str, end_date: str)
         url = f"https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date={roc_year}{month_str}01&stockNo={stock_id}&response=json"
         with httpx.Client(timeout=30) as client:
             try:
-                resp = client.get(url)
-                resp.raise_for_status()
-                payload = resp.json()
+                payload = _request_json(client, "GET", url)
             except Exception:
                 break
         if payload.get("stat") != "OK":

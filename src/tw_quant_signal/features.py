@@ -3,14 +3,24 @@ import numpy as np
 from datetime import date, timedelta
 
 from tw_quant_signal.db import SignalDB
-from tw_quant_signal.twse_client import WATCH_STOCKS, fetch_valuations
+from tw_quant_signal.twse_client import WATCH_STOCKS
 from tw_quant_signal.indicators import compute_indicators
 
 
-def compute_all_features(db: SignalDB) -> list[dict]:
+def compute_all_features(db: SignalDB, val_map: dict[str, dict] | None = None, indicators_map: dict[str, list[dict]] | None = None) -> list[dict]:
+    """計算全部觀察標的之特徵（T016 §2：valuation 由外部一次拉取傳入）。
+
+    Args:
+        db: SignalDB
+        val_map: 全體股票估值 map（stock_id -> {pe_ratio, pb_ratio, dividend_yield}）
+        indicators_map: 已算好的技術指標 map（stock_id -> compute_indicators 輸出列表）
+    """
+    if val_map is None:
+        from tw_quant_signal.twse_client import fetch_valuations_all
+        val_map = fetch_valuations_all()
     features = []
     for sid in WATCH_STOCKS:
-        row = _stock_features(db, sid)
+        row = _stock_features(db, sid, val=val_map.get(sid, {}), indicators=indicators_map.get(sid) if indicators_map else None)
         if row:
             features.append(row)
     row = _index_features(db)
@@ -22,7 +32,23 @@ def compute_all_features(db: SignalDB) -> list[dict]:
     return features
 
 
-def _stock_features(db: SignalDB, stock_id: str) -> dict | None:
+def compute_indicators_for_stock(db: SignalDB, stock_id: str, lookback: int = 120, full: bool = False) -> list[dict]:
+    """T016 §4：集中計算單一標的之技術指標（供 ingestion 一次批次計算並
+    傳入 _stock_features，避免 features 層重複查詢/計算）。
+
+    incremental 日增量：lookback=120 天即可（MA60+BB20+RSI14 均需 <120 天），
+    比 365 天可節省約 67% 運算時間。full=True 時強制使用 365 天（backfill 場景）。
+    """
+    limit = 365 if full else lookback
+    prices = db.get_stock_prices(stock_id, limit=limit)
+    if len(prices) < 60:
+        return []
+    prices = [dict(p) for p in prices]
+    prices.sort(key=lambda p: p["trade_date"])
+    return compute_indicators(prices, stock_id=stock_id)
+
+
+def _stock_features(db: SignalDB, stock_id: str, val: dict | None = None, indicators: list[dict] | None = None) -> dict | None:
     with db.connect() as conn:
         prices = conn.execute(
             "SELECT trade_date, close, volume FROM daily_prices WHERE stock_id=? ORDER BY trade_date DESC LIMIT 365",
@@ -34,13 +60,25 @@ def _stock_features(db: SignalDB, stock_id: str) -> dict | None:
         trade_date = latest[0]
         close = latest[1]
 
-        ind = conn.execute(
-            "SELECT ma5, ma20, ma60, rsi14, bb_upper, bb_middle, bb_lower, volume_ma5, volume_ma20 "
-            "FROM tech_indicators WHERE stock_id=? ORDER BY trade_date DESC LIMIT 1",
-            [stock_id],
-        ).fetchone()
-        if not ind:
-            return None
+        if indicators is None:
+            ind = conn.execute(
+                "SELECT ma5, ma20, ma60, rsi14, bb_upper, bb_middle, bb_lower, volume_ma5, volume_ma20 "
+                "FROM tech_indicators WHERE stock_id=? ORDER BY trade_date DESC LIMIT 1",
+                [stock_id],
+            ).fetchone()
+            if not ind:
+                return None
+        else:
+            latest_ind = indicators[-1] if indicators else None
+            if not latest_ind:
+                return None
+            ind = {
+                "ma5": latest_ind.get("ma5"), "ma20": latest_ind.get("ma20"),
+                "ma60": latest_ind.get("ma60"), "rsi14": latest_ind.get("rsi14"),
+                "bb_upper": latest_ind.get("bb_upper"), "bb_middle": latest_ind.get("bb_middle"),
+                "bb_lower": latest_ind.get("bb_lower"), "volume_ma5": latest_ind.get("volume_ma5"),
+                "volume_ma20": latest_ind.get("volume_ma20"),
+            }
 
         inst = conn.execute(
             "SELECT foreign_investors_net, sity_investors_net, dealer_net "
@@ -54,9 +92,7 @@ def _stock_features(db: SignalDB, stock_id: str) -> dict | None:
             [stock_id],
         ).fetchall()
 
-    today = date.today().isoformat()
-    valuations = fetch_valuations([stock_id])
-    val = valuations.get(stock_id, {})
+    val = val or {}
 
     df = pd.DataFrame([{"close": r[1], "volume": r[2]} for r in prices])
     returns = df["close"].pct_change()

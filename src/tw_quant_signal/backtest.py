@@ -10,7 +10,7 @@ import yaml
 from tw_quant_signal.db import SignalDB
 from tw_quant_signal.twse_client import WATCH_STOCKS
 from tw_quant_signal.indicators import compute_indicators
-from tw_quant_signal.rules import _load_rules, evaluate_rule
+from tw_quant_signal.rules import _load_rules, evaluate_rule, _load_features
 
 
 DEFAULT_COST = {
@@ -309,18 +309,9 @@ def run_backtest(
             if not stock_feat:
                 continue
 
-            all_stock_feats = {sid: stock_feat}
-            
-            # Get nearest available features for other stocks (for stock_2330_* references)
-            for other in stocks:
-                if other != sid:
-                    with db.connect() as conn:
-                        other_row = conn.execute(
-                            "SELECT data FROM features WHERE stock_id=? AND trade_date<=? ORDER BY trade_date DESC LIMIT 1",
-                            [other, td],
-                        ).fetchone()
-                    if other_row:
-                        all_stock_feats[other] = json.loads(other_row[0])
+            # T016 §1：以 as_of 日載入其他股票之特徵（避免取到未來/最新特徵）
+            all_stock_feats = _load_features(db, trade_date=td)
+            all_stock_feats[sid] = stock_feat
 
             for rule in rules:
                 try:

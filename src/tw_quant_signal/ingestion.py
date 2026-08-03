@@ -6,14 +6,14 @@ from tw_quant_signal.twse_client import (
     fetch_watch_stocks_prices,
     fetch_market_index,
     fetch_institutional_flows,
+    fetch_valuations_all,
     fetch_monthly_revenue_batch,
     fetch_yf_quarterly_financials_batch,
     fetch_historical_daily_prices,
     fetch_margin_trading_detailed,
     WATCH_STOCKS,
 )
-from tw_quant_signal.indicators import compute_indicators
-from tw_quant_signal.features import compute_all_features
+from tw_quant_signal.features import compute_all_features, compute_indicators_for_stock
 
 
 def _fetch_dividends_yf(stock_id: str) -> list[dict]:
@@ -95,7 +95,7 @@ class IngestionEngine:
 
     def run_daily(self, run_date: str = None) -> dict:
         run_date = run_date or date.today().isoformat()
-        results = {"index": "skip", "stocks": "skip", "institutional": "skip", "indicators": "skip", "features": "skip", "monthly_revenue": "skip", "quarterly_financials": "skip", "dividends": "skip", "margin_trading": "skip"}
+        results = {"index": "skip", "stocks": "skip", "institutional": "skip", "indicators": "skip", "features": "skip", "monthly_revenue": "skip", "quarterly_financials": "skip", "dividends": "skip", "margin_trading": "skip", "valuations": "skip"}
 
         results["index"] = self._ingest_index(run_date)
         results["stocks"] = self._ingest_watch_stocks(run_date)
@@ -104,6 +104,7 @@ class IngestionEngine:
         results["monthly_revenue"] = self._ingest_monthly_revenue(run_date)
         results["quarterly_financials"] = self._ingest_quarterly_financials(run_date)
         results["dividends"] = self._ingest_dividends(run_date)
+        results["valuations"] = self._ingest_valuations()
         results["indicators"] = self._ingest_indicators()
         results["features"] = self._ingest_features()
         return results
@@ -160,13 +161,14 @@ class IngestionEngine:
     def _ingest_indicators(self) -> str:
         today = date.today().isoformat()
         try:
+            indicators_map = {}
             for sid in WATCH_STOCKS:
-                prices = self.db.get_stock_prices(sid, limit=365)
-                if len(prices) < 60:
-                    continue
-                indicators = compute_indicators(prices, stock_id=sid)
-                if indicators:
-                    self.db.upsert_tech_indicators(indicators)
+                ind_rows = compute_indicators_for_stock(self.db, sid, lookback=120)
+                if ind_rows:
+                    self.db.upsert_tech_indicators(ind_rows)
+                    indicators_map[sid] = ind_rows
+            # 暫存供 _ingest_features 使用，避免二次計算
+            self._latest_indicators = indicators_map
             self.db.log_pipeline(today, "tech_indicators", "ok")
             return "ok"
         except Exception as e:
@@ -174,16 +176,25 @@ class IngestionEngine:
             return "fail"
 
     def _ingest_monthly_revenue(self, run_date: str) -> str:
+        """T016 §3：月營收批次改為 async 併發（單一股票內部月份平行）。
+
+        注意：不跨股票平行（MOPS 反爬對總併發數敏感，曾因 3 股×併發
+        同時請求觸發封鎖）。每檔股票依序處理，批次內部以 _MOPS_CONCURRENCY
+        平行抓取。
+        增量：僅抓取 DB 中缺少的月份（正常每日運行只會新增 1–2 個月），
+        大幅降低請求數與反爬風險。
+        """
         total = 0
         errors = []
         for sid in WATCH_STOCKS:
             if sid == "0050":  # ETF, no MOPS monthly revenue
                 continue
             try:
-                rows = fetch_monthly_revenue_batch(sid, months=36)
+                rows = fetch_monthly_revenue_batch(sid, months=36, incremental=True, db=self.db)
                 if rows:
                     self.db.upsert_monthly_revenue(rows)
                     total += len(rows)
+                # rows=[] 屬正常（最新月份尚未公告），非錯誤
             except Exception as e:
                 errors.append(f"{sid}:{e}")
         status = "fail" if errors and total == 0 else "ok"
@@ -192,6 +203,25 @@ class IngestionEngine:
             msg += f" errors={';'.join(errors)}"
         self.db.log_pipeline(run_date, "monthly_revenue", status, msg)
         return status
+
+    def _ingest_valuations(self) -> str:
+        """T016 §2：一次拉取全體觀察股票 valuations，供 features 階段使用。
+
+        估值為 BWIBBU_ALL 全體資料（一次 HTTP），本方法拉取後以
+        `self._latest_valuations` 暫存屬性供 _ingest_features 取用。
+        """
+        today = date.today().isoformat()
+        try:
+            val_map = fetch_valuations_all()
+            if not val_map:
+                self.db.log_pipeline(today, "valuations", "skip", "empty response")
+                return "skip"
+            self._latest_valuations = val_map
+            self.db.log_pipeline(today, "valuations", "ok", f"stocks={len(val_map)}")
+            return "ok"
+        except Exception as e:
+            self.db.log_pipeline(today, "valuations", "fail", str(e))
+            return "fail"
 
     def _ingest_quarterly_financials(self, run_date: str) -> str:
         try:
@@ -237,7 +267,9 @@ class IngestionEngine:
     def _ingest_features(self) -> str:
         today = date.today().isoformat()
         try:
-            features = compute_all_features(self.db)
+            val_map = getattr(self, "_latest_valuations", None)
+            indicators_map = getattr(self, "_latest_indicators", None)
+            features = compute_all_features(self.db, val_map=val_map, indicators_map=indicators_map)
             if features:
                 self.db.upsert_features(features)
             self.db.log_pipeline(today, "features", "ok", f"count={len(features)}")
