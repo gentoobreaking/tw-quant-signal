@@ -43,3 +43,6 @@ class Settings:
 
 
 settings = Settings()
+
+# T020: WATCH_STOCKS 的規範定義移至此處（twse_client 及各模組由此 re-import）。
+WATCH_STOCKS: list[str] = settings.watch_stocks

@@ -9,12 +9,14 @@ import pandas as pd
 import httpx
 
 from tw_quant_signal.config import settings
+# T020: WATCH_STOCKS 規範定義已移至 config.py，此處 re-export 維持向後相容。
+from tw_quant_signal.config import WATCH_STOCKS  # noqa: F401
 
 TWSE_OPENAPI = os.getenv("TWSE_BASE_URL", "https://openapi.twse.com.tw/v1")
 TWSE_RWD = "https://www.twse.com.tw/rwd/zh"
 _ROC_EPOCH = 1911
 
-WATCH_STOCKS = settings.watch_stocks
+# WATCH_STOCKS 來自 config.py（見上 import），不再於此重新定義。
 
 # HTTP 重試（T016 §5）：max 3 retry、指數 backoff
 RETRY_MAX = 3

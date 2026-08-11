@@ -1,97 +1,28 @@
-from datetime import date, timedelta
-from typing import Optional
+from datetime import date
 
 from tw_quant_signal.db import SignalDB
-from tw_quant_signal.twse_client import (
-    fetch_watch_stocks_prices,
-    fetch_market_index,
-    fetch_institutional_flows,
-    fetch_valuations_all,
-    fetch_monthly_revenue_batch,
-    fetch_yf_quarterly_financials_batch,
-    fetch_historical_daily_prices,
-    fetch_margin_trading_detailed,
-    WATCH_STOCKS,
-)
 from tw_quant_signal.features import compute_all_features, compute_indicators_for_stock
-
-
-def _fetch_dividends_yf(stock_id: str) -> list[dict]:
-    """Fetch dividend history from yfinance for a Taiwan stock.
-    
-    Groups dividends by year (to handle quarterly payouts) and returns up to 5 years.
-    """
-    try:
-        import yfinance as yf
-        import pandas as pd
-    except ImportError:
-        return []
-    try:
-        ticker = yf.Ticker(f"{stock_id}.TW")
-        div = ticker.dividends
-    except Exception:
-        return []
-    if div is None or div.empty:
-        return []
-    
-    # Group by year and sum (Taiwan stocks often pay quarterly)
-    div_df = div.reset_index()
-    div_df.columns = ['date', 'amount']
-    div_df['year'] = div_df['date'].dt.year
-    yearly_div = div_df.groupby('year').agg({
-        'amount': 'sum',
-        'date': 'first'  # Use first ex-date of the year
-    }).reset_index()
-    
-    results = []
-    for _, row in yearly_div.iterrows():
-        year = int(row['year'])
-        ex_date = row['date'].strftime("%Y-%m-%d")
-        cash_dividend = round(float(row['amount']), 2) if not pd.isna(row['amount']) else None
-        
-        cash_yield = None
-        close_before = None
-        # Try to get close price before ex-date for yield calculation
-        import httpx
-        try:
-            from datetime import timedelta
-            lookback = (row['date'] - timedelta(days=5)).strftime("%Y%m%d")
-            resp = httpx.get(
-                f"https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date={lookback}&stockNo={stock_id}&response=json",
-                timeout=10,
-            )
-            payload = resp.json()
-            if payload.get("stat") == "OK":
-                for r in payload.get("data", []):
-                    parts = r[0].split("/")
-                    if len(parts) == 3:
-                        ad = f"{int(parts[0])+1911}-{parts[1]}-{parts[2]}"
-                        if ad == ex_date:
-                            close_before = float(r[6].replace(",", "")) if r[6].replace(",", "").replace(".", "").lstrip("-").isdigit() else None
-                            break
-                if close_before and cash_dividend:
-                    cash_yield = round(cash_dividend / close_before * 100, 2)
-        except Exception:
-            pass
-        
-        results.append({
-            "stock_id": stock_id,
-            "year": year,
-            "ex_date": ex_date,
-            "close_before_ex": close_before,
-            "cash_dividend": cash_dividend,
-            "cash_pay_date": None,
-            "cash_yield": cash_yield,
-            "stock_dividend": None,
-        })
-    
-    # Return last 5 years, most recent first
-    return sorted(results, key=lambda r: r["year"], reverse=True)[:5]
+from tw_quant_signal.provider import DataProvider, create_data_provider
 
 
 class IngestionEngine:
-    def __init__(self, db: SignalDB):
+    def __init__(
+        self,
+        db: SignalDB,
+        provider: DataProvider | None = None,
+    ):
+        """T020: 資料來源改由 DataProvider 抽象層提供。
+
+        Args:
+            db: SignalDB 實例。
+            provider: DataProvider 實例；省略時依
+                TW_QUANT_DATA_PROVIDER（預設 direct）建立。
+        """
         self.db = db
+        self.provider = provider or create_data_provider()
+        self._latest_indicators: dict = {}
+        self._latest_valuations: dict = {}
+        self._watch_stocks: list[str] = list(self.provider.watch_stocks)
 
     def run_daily(self, run_date: str = None) -> dict:
         run_date = run_date or date.today().isoformat()
@@ -111,14 +42,14 @@ class IngestionEngine:
 
     def backfill_prices(self, stock_id: str, start_date: str, end_date: str = None) -> int:
         end_date = end_date or date.today().isoformat()
-        rows = fetch_historical_daily_prices(stock_id, start_date, end_date)
+        rows = self.provider.fetch_historical_daily_prices(stock_id, start_date, end_date)
         if rows:
             self.db.upsert_daily_prices(rows)
         return len(rows)
 
     def _ingest_index(self, run_date: str) -> str:
         try:
-            index_data = fetch_market_index()
+            index_data = self.provider.fetch_market_index()
             if index_data:
                 self.db.upsert_market_index(index_data)
                 self.db.log_pipeline(run_date, "market_index", "ok")
@@ -131,7 +62,7 @@ class IngestionEngine:
 
     def _ingest_watch_stocks(self, run_date: str) -> str:
         try:
-            rows = fetch_watch_stocks_prices()
+            rows = self.provider.fetch_watch_stocks_prices()
             if rows:
                 self.db.upsert_daily_prices(rows)
                 for r in rows:
@@ -147,7 +78,7 @@ class IngestionEngine:
 
     def _ingest_institutional(self, run_date: str) -> str:
         try:
-            rows = fetch_institutional_flows()
+            rows = self.provider.fetch_institutional_flows()
             if rows:
                 self.db.upsert_institutional_flows(rows)
                 self.db.log_pipeline(run_date, "institutional_flows", "ok", f"records={len(rows)}")
@@ -162,7 +93,7 @@ class IngestionEngine:
         today = date.today().isoformat()
         try:
             indicators_map = {}
-            for sid in WATCH_STOCKS:
+            for sid in self._watch_stocks:
                 ind_rows = compute_indicators_for_stock(self.db, sid, lookback=120)
                 if ind_rows:
                     self.db.upsert_tech_indicators(ind_rows)
@@ -186,11 +117,11 @@ class IngestionEngine:
         """
         total = 0
         errors = []
-        for sid in WATCH_STOCKS:
+        for sid in self._watch_stocks:
             if sid == "0050":  # ETF, no MOPS monthly revenue
                 continue
             try:
-                rows = fetch_monthly_revenue_batch(sid, months=36, incremental=True, db=self.db)
+                rows = self.provider.fetch_monthly_revenue_batch(sid, months=36, incremental=True, db=self.db)
                 if rows:
                     self.db.upsert_monthly_revenue(rows)
                     total += len(rows)
@@ -212,7 +143,7 @@ class IngestionEngine:
         """
         today = date.today().isoformat()
         try:
-            val_map = fetch_valuations_all()
+            val_map = self.provider.fetch_valuations()
             if not val_map:
                 self.db.log_pipeline(today, "valuations", "skip", "empty response")
                 return "skip"
@@ -226,8 +157,8 @@ class IngestionEngine:
     def _ingest_quarterly_financials(self, run_date: str) -> str:
         try:
             total = 0
-            for sid in WATCH_STOCKS:
-                rows = fetch_yf_quarterly_financials_batch(sid, max_quarters=20)
+            for sid in self._watch_stocks:
+                rows = self.provider.fetch_quarterly_financials_batch(sid, max_quarters=20)
                 if rows:
                     self.db.upsert_quarterly_financials(rows)
                     total += len(rows)
@@ -240,8 +171,8 @@ class IngestionEngine:
     def _ingest_dividends(self, run_date: str) -> str:
         try:
             total = 0
-            for sid in WATCH_STOCKS:
-                rows = _fetch_dividends_yf(sid)
+            for sid in self._watch_stocks:
+                rows = self.provider.fetch_dividends(sid)
                 if rows:
                     self.db.upsert_dividends(rows)
                     total += len(rows)
@@ -253,8 +184,8 @@ class IngestionEngine:
 
     def _ingest_margin_trading(self, run_date: str) -> str:
         try:
-            rows = fetch_margin_trading_detailed(run_date)
-            watch_set = set(WATCH_STOCKS)
+            rows = self.provider.fetch_margin_trading_detailed(run_date)
+            watch_set = set(self._watch_stocks)
             filtered = [r for r in rows if r["stock_id"] in watch_set]
             if filtered:
                 self.db.upsert_margin_trading(filtered)

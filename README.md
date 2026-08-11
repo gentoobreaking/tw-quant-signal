@@ -47,6 +47,12 @@ src/tw_quant_signal/
 ├── structural_change.py # 結構變化偵測（規則衰退 / 特徵漂移 / 勝率衰退）
 ├── env_manager.py       # 研究/實戰環境分離與規則治理
 ├── operation_log.py     # 操作日誌與合規紀錄
+├── provider/            # DataProvider 抽象層 (T020)
+│   ├── base.py          #   DataProvider 抽象基底 (10 個 fetch_* 簽名)
+│   ├── twse_direct.py   #   TwseDirectProvider (現有 HTTP 直連)
+│   ├── yfinance_provider.py # YfinanceProvider (財務/股利補充)
+│   ├── mcp_provider.py  #   McpDataProvider (tw-quant-mcp 骨架, T021/T022)
+│   └── __init__.py      #   工廠 create_data_provider() + 模式切換
 └── twse_client.py      # TWSE 資料源客戶端 (yfinance + FinMind)
 
 configs/
@@ -110,6 +116,15 @@ frontend/
 - **法規邊界** — `GOVERNANCE.md` 文件化，免責聲明自動附加於每日推播
 - **合規報告** — `GET /api/compliance-report` 含操作軌跡與法規說明
 
+### ✅ Phase 4 — 資料層抽象化 (T020)
+- **DataProvider 統一介面** — 10 個 `fetch_*` 抽象方法（行情/指數/法人/估值/融資券/月營收/季報/股利/歷史資料）
+- **可替換資料源** — `create_data_provider()` 工廠 + `TW_QUANT_DATA_PROVIDER=direct|mcp` 環境變數切換
+- **TwseDirectProvider** — 現有 HTTP 直連封裝（twse_client 為內部實作）
+- **YfinanceProvider** — 財務/股利補充提供者（yfinance 缺省時 graceful 降級）
+- **McpDataProvider 骨架** — 預留 tw-quant-mcp 對接（T021/T022 實作）
+- **上游零耦合** — ingestion / features / backtest / backfill 均改由 DataProvider 取數，替換資料源不需改動上層
+- **向後相容** — direct 模式行為與舊程式碼完全一致（193 測試全通過）
+
 ### 📋 待實作
 | Task | 說明 |
 |------|------|
@@ -159,6 +174,7 @@ npm run build
 | 變數 | 用途 |
 |------|------|
 | `TW_QUANT_DB` | 資料庫路徑 |
+| `TW_QUANT_DATA_PROVIDER` | 資料來源模式 (`direct` 現有 HTTP 直連 / `mcp` tw-quant-mcp，預設 `direct`) |
 | `TELEGRAM_BOT_TOKEN` | Telegram Bot Token |
 | `TELEGRAM_CHAT_ID` | Telegram 聊天室 ID |
 | `DISCORD_WEBHOOK_URL` | Discord Webhook URL |

@@ -1,17 +1,16 @@
 import sys
 from datetime import date, timedelta
-from dateutil.relativedelta import relativedelta
+
 import pandas as pd
+from dateutil.relativedelta import relativedelta
 
 from tw_quant_signal.db import SignalDB
-from tw_quant_signal.twse_client import (
-    fetch_historical_daily_prices,
-    fetch_institutional_flows,
-    fetch_historical_index,
-    WATCH_STOCKS,
-)
-from tw_quant_signal.indicators import compute_indicators
 from tw_quant_signal.features import compute_all_features
+from tw_quant_signal.indicators import compute_indicators
+from tw_quant_signal.provider import create_data_provider
+
+# T020: 資料來源統一由 DataProvider 提供，backfill 不再直接 import twse_client 函式。
+_provider = create_data_provider()
 
 
 def backfill_via_yahoo(stock_id: str, years: int = 5) -> int:
@@ -54,7 +53,7 @@ def backfill_via_yahoo(stock_id: str, years: int = 5) -> int:
 def backfill_via_twse_current_month(stock_id: str) -> int:
     today = date.today()
     start = today.replace(day=1)
-    rows = fetch_historical_daily_prices(stock_id, start.isoformat(), today.isoformat())
+    rows = _provider.fetch_historical_daily_prices(stock_id, start.isoformat(), today.isoformat())
     if rows:
         SignalDB().upsert_daily_prices(rows)
     print(f"  → {len(rows)} 筆寫入 (TWSE 當月)")
@@ -63,7 +62,7 @@ def backfill_via_twse_current_month(stock_id: str) -> int:
 
 def backfill_index(years: int = 5):
     print("\n回填加權指數歷史...")
-    rows = fetch_historical_index(years=years)
+    rows = _provider.fetch_historical_index(years=years)
     if not rows:
         print("  ⚠ 無法取得指數歷史")
         return
@@ -90,21 +89,21 @@ def main():
     db = SignalDB()
     db.init_db()
 
-    for sid in WATCH_STOCKS:
+    for sid in _provider.watch_stocks:
         n = backfill_via_yahoo(sid, years=5)
         if n == 0:
             n = backfill_via_twse_current_month(sid)
 
     backfill_index(years=5)
 
-    for sid in WATCH_STOCKS:
+    for sid in _provider.watch_stocks:
         backfill_indicators(sid)
 
     print("\n取得近期法人買賣超...")
     today = date.today()
     for i in range(10):
         d = (today - timedelta(days=i)).isoformat()
-        rows = fetch_institutional_flows(d)
+        rows = _provider.fetch_institutional_flows(d)
         if rows:
             db.upsert_institutional_flows(rows)
             print(f"  {d}: {len(rows)} 筆")

@@ -1,16 +1,27 @@
 import json
 import sys
-from datetime import date, datetime, timedelta
-from pathlib import Path
-from typing import Any
+from datetime import date
 
 import pandas as pd
-import yaml
 
 from tw_quant_signal.db import SignalDB
-from tw_quant_signal.twse_client import WATCH_STOCKS
 from tw_quant_signal.indicators import compute_indicators
-from tw_quant_signal.rules import _load_rules, evaluate_rule, _load_features
+from tw_quant_signal.provider import create_data_provider
+from tw_quant_signal.rules import _load_features, _load_rules, evaluate_rule
+
+
+def _watch_stocks() -> list[str]:
+    """T020: 觀察清單改由 DataProvider 提供（替代直接 import WATCH_STOCKS）。"""
+    return create_data_provider().watch_stocks
+
+
+def _dates_in_range(db: SignalDB, start: str, end: str) -> list[str]:
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT trade_date FROM daily_prices WHERE stock_id=? AND trade_date BETWEEN ? AND ? ORDER BY trade_date",
+            [_watch_stocks()[0], start, end],
+        ).fetchall()
+    return [r[0] for r in rows]
 
 
 DEFAULT_COST = {
@@ -29,7 +40,7 @@ def _dates_in_range(db: SignalDB, start: str, end: str) -> list[str]:
     with db.connect() as conn:
         rows = conn.execute(
             "SELECT DISTINCT trade_date FROM daily_prices WHERE stock_id=? AND trade_date BETWEEN ? AND ? ORDER BY trade_date",
-            [WATCH_STOCKS[0], start, end],
+            [_watch_stocks()[0], start, end],
         ).fetchall()
     return [r[0] for r in rows]
 
@@ -281,7 +292,7 @@ def run_backtest(
     forward_days: int = 5,
     cost_model: CostModel = None,
 ) -> list[dict]:
-    stocks = stocks or WATCH_STOCKS
+    stocks = stocks or _watch_stocks()
     end = end or date.today().isoformat()
     cost_model = cost_model or CostModel()
 
@@ -423,7 +434,7 @@ def print_report(results: list[dict]):
 
     # by state summary
     tv = sum(r["triggers"] for r in results)
-    print(f"\n三種市場狀態分布:")
+    print("\n三種市場狀態分布:")
     for state in ["bull", "bear", "range"]:
         cnt = sum(r["by_state"].get(state, 0) for r in results)
         pct = cnt / tv if tv else 0

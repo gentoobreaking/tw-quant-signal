@@ -1,10 +1,11 @@
-import pandas as pd
-import numpy as np
-from datetime import date, timedelta
 
+import numpy as np
+import pandas as pd
+
+from tw_quant_signal.config import WATCH_STOCKS
 from tw_quant_signal.db import SignalDB
-from tw_quant_signal.twse_client import WATCH_STOCKS
 from tw_quant_signal.indicators import compute_indicators
+from tw_quant_signal.provider import create_data_provider
 
 
 def compute_all_features(db: SignalDB, val_map: dict[str, dict] | None = None, indicators_map: dict[str, list[dict]] | None = None) -> list[dict]:
@@ -16,8 +17,8 @@ def compute_all_features(db: SignalDB, val_map: dict[str, dict] | None = None, i
         indicators_map: 已算好的技術指標 map（stock_id -> compute_indicators 輸出列表）
     """
     if val_map is None:
-        from tw_quant_signal.twse_client import fetch_valuations_all
-        val_map = fetch_valuations_all()
+        # T020: 估值資料改由 DataProvider 抽象層取得（替代 inline import twse_client）
+        val_map = create_data_provider().fetch_valuations()
     features = []
     for sid in WATCH_STOCKS:
         row = _stock_features(db, sid, val=val_map.get(sid, {}), indicators=indicators_map.get(sid) if indicators_map else None)
