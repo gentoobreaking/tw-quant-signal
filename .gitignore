@@ -28,3 +28,12 @@ htmlcov/
 
 # Docker
 postgres_data/
+
+# tw-quant-mcp L2 快取（執行產物）
+data/cache.db
+data/cache.db-shm
+data/cache.db-wal
+data/index.db
+data/index.db-shm
+data/index.db-wal
+data/logs/

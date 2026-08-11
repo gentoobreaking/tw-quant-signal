@@ -122,7 +122,8 @@ class TestYfinanceProvider:
 
 
 class TestMcpDataProvider:
-    def test_skeleton_raises(self):
+    def test_constructs(self):
+        """T021: McpDataProvider 已實作，不再拋 NotImplementedError。"""
         p = McpDataProvider()
-        with pytest.raises(NotImplementedError):
-            p.fetch_market_index()
+        assert p.watch_stocks  # 從 config 讀取
+        assert p._fallback is not None

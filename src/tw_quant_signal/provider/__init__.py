@@ -47,7 +47,8 @@ def create_data_provider(mode: str | None = None) -> DataProvider:
         return TwseDirectProvider()
     if mode == "mcp":
         return McpDataProvider(
-            base_url=os.getenv("TW_QUANT_MCP_URL") or None
+            server_path=os.getenv("MCP_SERVER_PATH") or None,
+            call_timeout=float(os.getenv("MCP_CALL_TIMEOUT", "30")),
         )
     raise ValueError(
         f"Unknown data provider mode: {mode!r} (expected 'direct' or 'mcp')"

@@ -51,7 +51,9 @@ src/tw_quant_signal/
 │   ├── base.py          #   DataProvider 抽象基底 (10 個 fetch_* 簽名)
 │   ├── twse_direct.py   #   TwseDirectProvider (現有 HTTP 直連)
 │   ├── yfinance_provider.py # YfinanceProvider (財務/股利補充)
-│   ├── mcp_provider.py  #   McpDataProvider (tw-quant-mcp 骨架, T021/T022)
+│   ├── mcp_provider.py  #   McpDataProvider (tw-quant-mcp, T021 盤後 / T022 MOPS)
+│   ├── mcp_client.py    #   MCP stdio client (JSON-RPC 通訊, S1)
+│   ├── mcp_normalize.py #   MCP Envelope → dict 格式轉換 (S4)
 │   └── __init__.py      #   工廠 create_data_provider() + 模式切換
 └── twse_client.py      # TWSE 資料源客戶端 (yfinance + FinMind)
 
@@ -121,9 +123,17 @@ frontend/
 - **可替換資料源** — `create_data_provider()` 工廠 + `TW_QUANT_DATA_PROVIDER=direct|mcp` 環境變數切換
 - **TwseDirectProvider** — 現有 HTTP 直連封裝（twse_client 為內部實作）
 - **YfinanceProvider** — 財務/股利補充提供者（yfinance 缺省時 graceful 降級）
-- **McpDataProvider 骨架** — 預留 tw-quant-mcp 對接（T021/T022 實作）
 - **上游零耦合** — ingestion / features / backtest / backfill 均改由 DataProvider 取數，替換資料源不需改動上層
 - **向後相容** — direct 模式行為與舊程式碼完全一致（193 測試全通過）
+
+### ✅ Phase 4 — TWSE 盤後資料遷移至 tw-quant-mcp (T021)
+- **McpDataProvider 實作** — TWSE 盤後五方法（行情/指數/法人/估值/融資券）改由 tw-quant-mcp stdio JSON-RPC 提供
+- **McpClient** — 輕量 stdio client：`subprocess.Popen` + JSON-RPC 2.0 + `MCP_SERVER_PATH` env + 健康檢查 ping + 重試 2 次/1s backoff
+- **格式轉換層** — `mcp_normalize.py` 統一 MCP Envelope → Python dict 映射（含 % → 十進位殖利率）
+- **Symbol Registry 檢查** — lazy 載入 `get_symbol_list`，ETF（0050）/指數自動降級 direct
+- **S5 自動降級** — mcp 呼叫失敗/逾時 → warning log + pipeline_log `source=mcp|direct(fallback)` 標註，pipeline 不中斷
+- **S6 端到端驗證** — 完整 pipeline 兩模式比對：daily_prices 共同交易日完全一致，mcp 模式資料更新（08-11 vs 08-10）
+- **測試** — 209 passed（新增 16 個 T021 測試：成功路徑/降級/ETF/歷史逐月呼叫）
 
 ### 📋 待實作
 | Task | 說明 |
@@ -175,6 +185,8 @@ npm run build
 |------|------|
 | `TW_QUANT_DB` | 資料庫路徑 |
 | `TW_QUANT_DATA_PROVIDER` | 資料來源模式 (`direct` 現有 HTTP 直連 / `mcp` tw-quant-mcp，預設 `direct`) |
+| `MCP_SERVER_PATH` | tw-quant-mcp 執行檔路徑（`mcp` 模式用；未設定時依 PATH） |
+| `MCP_CALL_TIMEOUT` | mcp 單次 tool 呼叫逾時秒數（預設 30） |
 | `TELEGRAM_BOT_TOKEN` | Telegram Bot Token |
 | `TELEGRAM_CHAT_ID` | Telegram 聊天室 ID |
 | `DISCORD_WEBHOOK_URL` | Discord Webhook URL |
@@ -278,5 +290,11 @@ docker compose --profile scheduler up   # 額外啟動定時排程容器
 ## License
 ---
 
-## 授權
-Apache License 2.0. 僅供研究用途，投資請謹慎評估風險。
+本專案採用 **Apache License 2.0** 授權。
+
+- 完整授權條款見 [`LICENSE`](LICENSE)（專案根目錄）
+- Apache-2.0 官方條款：<https://www.apache.org/licenses/LICENSE-2.0>
+- 版權與貢獻者資訊以 LICENSE 檔案為準
+
+> 本專案為研究/模擬用途，授權條款不構成任何投資建議或保證；
+> 使用/修改/再散佈前請詳閱 LICENSE 全文。

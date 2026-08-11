@@ -24,6 +24,17 @@ class IngestionEngine:
         self._latest_valuations: dict = {}
         self._watch_stocks: list[str] = list(self.provider.watch_stocks)
 
+    def _log_source(self, run_date: str, task: str, status: str, message: str = None) -> None:
+        """log_pipeline 並標註資料來源（T021 S5）。
+
+        mcp 模式降級時，pipeline_log.message 會附上 source=direct(fallback)
+        供事後追溯資料來源。direct 模式則為 source=direct。
+        """
+        source = getattr(self.provider, "last_source", None)
+        if source:
+            message = f"{message or ''} source={source}".strip()
+        self.db.log_pipeline(run_date, task, status, message)
+
     def run_daily(self, run_date: str = None) -> dict:
         run_date = run_date or date.today().isoformat()
         results = {"index": "skip", "stocks": "skip", "institutional": "skip", "indicators": "skip", "features": "skip", "monthly_revenue": "skip", "quarterly_financials": "skip", "dividends": "skip", "margin_trading": "skip", "valuations": "skip"}
@@ -68,12 +79,12 @@ class IngestionEngine:
                 for r in rows:
                     self.db.compute_adj_close(r["stock_id"])
                 ids = [r["stock_id"] for r in rows]
-                self.db.log_pipeline(run_date, "watch_stocks", "ok", f"stocks={','.join(ids)}")
+                self._log_source(run_date, "watch_stocks", "ok", f"stocks={','.join(ids)}")
                 return "ok"
-            self.db.log_pipeline(run_date, "watch_stocks", "fail", "empty response")
+            self._log_source(run_date, "watch_stocks", "fail", "empty response")
             return "fail"
         except Exception as e:
-            self.db.log_pipeline(run_date, "watch_stocks", "fail", str(e))
+            self._log_source(run_date, "watch_stocks", "fail", str(e))
             return "fail"
 
     def _ingest_institutional(self, run_date: str) -> str:
@@ -81,12 +92,12 @@ class IngestionEngine:
             rows = self.provider.fetch_institutional_flows()
             if rows:
                 self.db.upsert_institutional_flows(rows)
-                self.db.log_pipeline(run_date, "institutional_flows", "ok", f"records={len(rows)}")
+                self._log_source(run_date, "institutional_flows", "ok", f"records={len(rows)}")
                 return "ok"
-            self.db.log_pipeline(run_date, "institutional_flows", "skip", "no data (weekend/holiday?)")
+            self._log_source(run_date, "institutional_flows", "skip", "no data (weekend/holiday?)")
             return "skip"
         except Exception as e:
-            self.db.log_pipeline(run_date, "institutional_flows", "fail", str(e))
+            self._log_source(run_date, "institutional_flows", "fail", str(e))
             return "fail"
 
     def _ingest_indicators(self) -> str:
@@ -145,13 +156,13 @@ class IngestionEngine:
         try:
             val_map = self.provider.fetch_valuations()
             if not val_map:
-                self.db.log_pipeline(today, "valuations", "skip", "empty response")
+                self._log_source(today, "valuations", "skip", "empty response")
                 return "skip"
             self._latest_valuations = val_map
-            self.db.log_pipeline(today, "valuations", "ok", f"stocks={len(val_map)}")
+            self._log_source(today, "valuations", "ok", f"stocks={len(val_map)}")
             return "ok"
         except Exception as e:
-            self.db.log_pipeline(today, "valuations", "fail", str(e))
+            self._log_source(today, "valuations", "fail", str(e))
             return "fail"
 
     def _ingest_quarterly_financials(self, run_date: str) -> str:
@@ -189,10 +200,10 @@ class IngestionEngine:
             filtered = [r for r in rows if r["stock_id"] in watch_set]
             if filtered:
                 self.db.upsert_margin_trading(filtered)
-            self.db.log_pipeline(run_date, "margin_trading", "ok", f"records={len(filtered)}")
+            self._log_source(run_date, "margin_trading", "ok", f"records={len(filtered)}")
             return "ok"
         except Exception as e:
-            self.db.log_pipeline(run_date, "margin_trading", "fail", str(e))
+            self._log_source(run_date, "margin_trading", "fail", str(e))
             return "fail"
 
     def _ingest_features(self) -> str:
