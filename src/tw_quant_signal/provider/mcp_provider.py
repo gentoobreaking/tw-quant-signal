@@ -315,9 +315,16 @@ class McpDataProvider(DataProvider):
             ),
         )
         payload = data.get("data") if isinstance(data, dict) else data
-        rows = norm.normalize_monthly_revenue(payload, stock_id) if isinstance(payload, list) else []
+        if isinstance(payload, dict) and payload.get("rows"):
+            # mcp envelope：需 normalize（data_year_month 民國/西元、pct 欄位）
+            rows = norm.normalize_monthly_revenue(payload, stock_id)
+            rows.sort(key=lambda r: r["year_month"])
+        else:
+            # fallback 已 normalized list（含 stock_id/year_month）
+            rows = list(payload) if isinstance(payload, list) else []
+            rows.sort(key=lambda r: r.get("year_month", ""))
         if months:
-            rows = rows[:months]
+            rows = rows[-months:]  # 取最近 months 個月（升冪）
         return rows
 
     def fetch_quarterly_financials_batch(
@@ -328,7 +335,14 @@ class McpDataProvider(DataProvider):
             lambda p: p.fetch_quarterly_financials_batch(stock_id, max_quarters=max_quarters),
         )
         payload = data.get("data") if isinstance(data, dict) else data
-        rows = norm.normalize_financials(payload, stock_id) if isinstance(payload, list) else []
+        if isinstance(payload, dict) and payload.get("income"):
+            # mcp envelope：需 normalize（income/profit_ratios/balance_sheet）
+            rows = norm.normalize_financials(payload, stock_id)
+            rows.sort(key=lambda r: r["fiscal_quarter"])
+        else:
+            # fallback 已 normalized list
+            rows = list(payload) if isinstance(payload, list) else []
+            rows.sort(key=lambda r: r.get("fiscal_quarter", ""))
         return rows[:max_quarters] if max_quarters else rows
 
     def fetch_dividends(self, stock_id: str) -> list[dict]:
@@ -337,4 +351,8 @@ class McpDataProvider(DataProvider):
             lambda p: p.fetch_dividends(stock_id),
         )
         payload = data.get("data") if isinstance(data, dict) else data
-        return norm.normalize_dividends(payload, stock_id) if isinstance(payload, list) else []
+        if isinstance(payload, dict) and payload.get("years"):
+            # mcp envelope：需 normalize（dividend_year 民國→西元）
+            return norm.normalize_dividends(payload, stock_id)
+        # fallback 已 normalized list（year 已西元）
+        return list(payload) if isinstance(payload, list) else []

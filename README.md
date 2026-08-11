@@ -51,9 +51,9 @@ src/tw_quant_signal/
 │   ├── base.py          #   DataProvider 抽象基底 (10 個 fetch_* 簽名)
 │   ├── twse_direct.py   #   TwseDirectProvider (現有 HTTP 直連)
 │   ├── yfinance_provider.py # YfinanceProvider (財務/股利補充)
-│   ├── mcp_provider.py  #   McpDataProvider (tw-quant-mcp, T021 盤後 / T022 MOPS)
+│   ├── mcp_provider.py  #   McpDataProvider (tw-quant-mcp, T021 盤後 / T022 MOPS 全量)
 │   ├── mcp_client.py    #   MCP stdio client (JSON-RPC 通訊, S1)
-│   ├── mcp_normalize.py #   MCP Envelope → dict 格式轉換 (S4)
+│   ├── mcp_normalize.py #   MCP Envelope → dict 格式轉換 (S4, T022 MOPS 擴充)
 │   └── __init__.py      #   工廠 create_data_provider() + 模式切換
 └── twse_client.py      # TWSE 資料源客戶端 (yfinance + FinMind)
 
@@ -134,6 +134,14 @@ frontend/
 - **S5 自動降級** — mcp 呼叫失敗/逾時 → warning log + pipeline_log `source=mcp|direct(fallback)` 標註，pipeline 不中斷
 - **S6 端到端驗證** — 完整 pipeline 兩模式比對：daily_prices 共同交易日完全一致，mcp 模式資料更新（08-11 vs 08-10）
 - **測試** — 209 passed（新增 16 個 T021 測試：成功路徑/降級/ETF/歷史逐月呼叫）
+
+### ✅ Phase 4 — MOPS/基本面資料層遷移至 tw-quant-mcp (T022)
+- **MOPS 三方法實作** — `fetch_monthly_revenue_batch`/`fetch_dividends`/`fetch_quarterly_financials_batch` 改由 tw-quant-mcp 提供（get_monthly_revenue / get_dividend_history / get_financial_statements）
+- **格式轉換擴充** — 民國年→西元年（股利年度 +1911、年月 5/6 位判別）、pct 欄位映射、ROE/ROA 自資產負債表計算
+- **YfinanceProvider 保留** — mcp 財報對部分公司（2330/1101/2317）無資料，自動降級 `direct(fallback)`；股利以 yfinance 補 ex_date/yield（見 KNOWN_ISSUES.md）
+- **降級防重複 normalize** — 修復民國年雙重轉換 bug（2026→3937），以 payload 結構區分 mcp envelope vs fallback 結果
+- **S5 驗證** — mcp 模式完整 ingestion：三表正常寫入（月營收 2 / 季報 8 / 股利 8 筆）
+- **測試** — 211 passed（新增 2 個降級測試）
 
 ### 📋 待實作
 | Task | 說明 |

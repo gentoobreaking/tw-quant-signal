@@ -149,32 +149,89 @@ def normalize_historical_index(data: list) -> list[dict]:
 
 
 # --------------------------------------------------------------------- #
-# MOPS（T022 S2）
+# MOPS（T022 S1/S2）
 # --------------------------------------------------------------------- #
-def normalize_monthly_revenue(data: list, stock_id: str) -> list[dict]:
-    """get_monthly_revenue → monthly_revenue 列。"""
+def _roc_year_to_ad(roc: str | int | None) -> int | None:
+    """民國年 → 西元年（+1911）。"""
+    if roc is None or roc == "":
+        return None
+    try:
+        return int(roc) + 1911
+    except (ValueError, TypeError):
+        return None
+
+
+def _year_month_to_ad(ym: str | None) -> str:
+    """"YYYYMM" 或 "YYYY-MM" → "YYYY-MM"（民國年轉西元）。
+
+    規則：5 位數字（如 "11507"）→ 民國年；
+    6 位數字（如 "202607"）→ 西元年。
+    """
+    if not ym:
+        return ""
+    ym = str(ym).strip()
+    if len(ym) == 5 and ym.isdigit():
+        y = int(ym[:3]) + 1911
+        return f"{y}-{ym[3:]}"
+    if len(ym) == 6 and ym.isdigit():
+        return f"{ym[:4]}-{ym[4:]}"
+    if len(ym) == 7 and "-" in ym:
+        # "2026-07" 已西元
+        return ym
+    return ym
+
+
+def normalize_monthly_revenue(data, stock_id: str) -> list[dict]:
+    """get_monthly_revenue → monthly_revenue 列。
+
+    mcp 回傳兩種結構皆支援：
+    - dict {rows: [{data_year_month, revenue, mom_change_pct, yoy_change_pct}]}
+    - list（T022 前骨架格式）
+    輸出 {stock_id, year_month, revenue, mom_change, yoy_change}（與 direct 一致）。
+    """
+    if isinstance(data, dict):
+        rows = data.get("rows") or data.get("data") or []
+    else:
+        rows = data or []
     results = []
-    for r in data or []:
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        ym = _year_month_to_ad(r.get("data_year_month") or r.get("year_month") or r.get("date"))
+        if not ym:
+            continue
         results.append({
             "stock_id": stock_id,
-            "year_month": r.get("year_month") or r.get("date") or "",
+            "year_month": ym,
             "revenue": r.get("revenue"),
-            "mom_change": r.get("mom_change"),
-            "yoy_change": r.get("yoy_change"),
+            "mom_change": r.get("mom_change_pct", r.get("mom_change")),
+            "yoy_change": r.get("yoy_change_pct", r.get("yoy_change")),
         })
     return results
 
 
-def normalize_dividends(data: list, stock_id: str) -> list[dict]:
-    """get_dividend_history → dividends 表列。"""
+def normalize_dividends(data, stock_id: str) -> list[dict]:
+    """get_dividend_history → dividends 表列。
+
+    mcp 回傳 dict {years: [{dividend_year(民國), cash_dividend, stock_dividend}],
+    avg_cash_dividend, last_yield_pct}；T022 前骨架為 list。
+    輸出 {stock_id, year(西元), ex_date, close_before_ex, cash_dividend,
+    cash_pay_date, cash_yield, stock_dividend}（與 yfinance 一致）。
+    """
+    if isinstance(data, dict):
+        rows = data.get("years") or data.get("data") or []
+    else:
+        rows = data or []
     results = []
-    for r in data or []:
-        year = r.get("year")
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        year = _roc_year_to_ad(r.get("dividend_year") or r.get("year"))
         if year is None:
             continue
         results.append({
             "stock_id": stock_id,
-            "year": int(year),
+            "year": year,
             "ex_date": _pick(r, "ex_date", "ex_dividend_date"),
             "close_before_ex": _pick(r, "close_before_ex"),
             "cash_dividend": _pick(r, "cash_dividend", "cash_per_share"),
@@ -185,20 +242,66 @@ def normalize_dividends(data: list, stock_id: str) -> list[dict]:
     return results
 
 
-def normalize_financials(data: list, stock_id: str) -> list[dict]:
-    """get_financial_statements → quarterly_financials 列。"""
+def _as_rows(data) -> list[dict]:
+    """dict（單期）或 list（多期）→ list[dict]。"""
+    if isinstance(data, dict):
+        # 單期 dict：可能含 year/quarter 或本身就是一列
+        if data and ("year" in data or "quarter" in data):
+            return [data]
+        return []
+    if isinstance(data, list):
+        return [r for r in data if isinstance(r, dict)]
+    return []
+
+
+def normalize_financials(data, stock_id: str) -> list[dict]:
+    """get_financial_statements → quarterly_financials 列。
+
+    mcp 回傳 dict {income: [{year, quarter, eps, revenue}],
+    profit_ratios: [{gross_margin_pct}], balance_sheet: {total_equity, total_assets}}；
+    T022 前骨架為 list。
+    輸出 {stock_id, fiscal_quarter, eps, revenue, gross_margin, roe, roa}
+    （與 yfinance 一致，ROE/ROA 自 balance_sheet 計算）。
+    """
+    if isinstance(data, dict):
+        income_rows = _as_rows(data.get("income"))
+        ratio_rows = _as_rows(data.get("profit_ratios"))
+        bs_rows = _as_rows(data.get("balance_sheet"))
+    else:
+        income_rows = _as_rows(data)
+        ratio_rows = []
+        bs_rows = []
+    ratios_by_q = {}
+    for r in ratio_rows:
+        key = (r.get("year"), r.get("quarter"))
+        ratios_by_q[key] = r
+    bs_by_q = {}
+    for r in bs_rows:
+        key = (r.get("year"), r.get("quarter"))
+        bs_by_q[key] = r
     results = []
-    for r in data or []:
-        fiscal_quarter = r.get("fiscal_quarter") or r.get("period") or r.get("year_month")
-        if not fiscal_quarter:
+    for r in income_rows:
+        if not isinstance(r, dict):
             continue
+        year, quarter = r.get("year"), r.get("quarter")
+        if not year or not quarter:
+            continue
+        fiscal_quarter = f"{int(year)}Q{int(quarter)}"
+        ratio = ratios_by_q.get((year, quarter), {})
+        bs = bs_by_q.get((year, quarter), {})
+        # ROE / ROA：自資產負債表計算（與 yfinance 一致）
+        net_income = r.get("net_income")
+        total_equity = bs.get("total_equity") or bs.get("equity")
+        total_assets = bs.get("total_assets") or bs.get("assets")
+        roe = round(net_income / total_equity * 100, 2) if net_income and total_equity else None
+        roa = round(net_income / total_assets * 100, 2) if net_income and total_assets else None
         results.append({
             "stock_id": stock_id,
-            "fiscal_quarter": str(fiscal_quarter),
+            "fiscal_quarter": fiscal_quarter,
             "eps": _pick(r, "eps"),
             "revenue": _pick(r, "revenue"),
-            "gross_margin": _pick(r, "gross_margin"),
-            "roe": _pick(r, "roe"),
-            "roa": _pick(r, "roa"),
+            "gross_margin": _pick(ratio, "gross_margin_pct", "gross_margin"),
+            "roe": _pick(bs, "roe", "return_on_equity") or roe,
+            "roa": _pick(bs, "roa", "return_on_assets") or roa,
         })
     return results

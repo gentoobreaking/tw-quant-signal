@@ -7,11 +7,11 @@
 - mcp 不支援項目（ETF/指數）自動降級
 """
 
-import pytest
-from unittest import mock
 
-from tw_quant_signal.provider.mcp_provider import McpDataProvider
+import pytest
+
 from tw_quant_signal.provider.mcp_client import McpConnectionError
+from tw_quant_signal.provider.mcp_provider import McpDataProvider
 
 
 class _FakeClient:
@@ -230,33 +230,79 @@ class TestMcpDataProviderT021:
         tools = [c[0] for c in p._client.calls]
         assert tools.count("get_stock_daily_kline") == 1
 
-    # ---- MOPS（T022 預留） ----
+    # ---- MOPS（T022） ----
     def test_monthly_revenue_mcp(self):
         p, fb = self._make(results={
-            "get_monthly_revenue": {"data": [
-                {"year_month": "2026-07", "revenue": 100, "mom_change": 1.0, "yoy_change": 2.0}]},
+            "get_monthly_revenue": {"data": {"symbol": "2330", "rows": [
+                {"data_year_month": "202607", "revenue": 467580548000,
+                 "mom_change_pct": 5.62, "yoy_change_pct": 44.69},
+                {"data_year_month": "202606", "revenue": 442679969000,
+                 "mom_change_pct": None, "yoy_change_pct": None},
+            ]}},
         })
         rows = p.fetch_monthly_revenue_batch("2330", months=36)
-        assert rows[0]["year_month"] == "2026-07"
-        assert rows[0]["revenue"] == 100
+        assert rows[-1]["year_month"] == "2026-07"  # 民國→西元
+        assert rows[-1]["revenue"] == 467580548000
+        assert rows[-1]["mom_change"] == 5.62  # mom_change_pct → mom_change
+        assert rows[-1]["yoy_change"] == 44.69
+        assert p.last_source == "mcp"
 
     def test_dividends_mcp(self):
         p, fb = self._make(results={
-            "get_dividend_history": {"data": [
-                {"year": 2025, "ex_date": "2025-07-01", "cash_dividend": 3.0}]},
+            "get_dividend_history": {"data": {"symbol": "2330", "years": [
+                {"dividend_year": "114", "progress": "董事會決議",
+                 "cash_dividend": 6, "stock_dividend": 0},
+            ], "consecutive_years": 2, "last_yield_pct": 0.92}},
         })
         rows = p.fetch_dividends("2330")
-        assert rows[0]["year"] == 2025
-        assert rows[0]["cash_dividend"] == 3.0
+        assert rows[0]["year"] == 2025  # 民國 114 → 西元 2025
+        assert rows[0]["cash_dividend"] == 6
+        assert rows[0]["stock_dividend"] == 0
+        assert p.last_source == "mcp"
 
     def test_quarterly_financials_mcp(self):
         p, fb = self._make(results={
-            "get_financial_statements": {"data": [
-                {"fiscal_quarter": "2026Q2", "eps": 5.0}]},
+            "get_financial_statements": {"data": {"symbol": "2308",
+                "income": [{"year": 2026, "quarter": 2, "eps": 17.59,
+                    "revenue": 342608732000, "net_income": 51003600000}],
+                "profit_ratios": [{"year": 2026, "quarter": 2,
+                    "gross_margin_pct": 36.27}],
+                "balance_sheet": {"year": 2026, "quarter": 2,
+                    "total_equity": 350224892000, "total_assets": 754433332000},
+            }},
         })
-        rows = p.fetch_quarterly_financials_batch("2330", max_quarters=20)
+        rows = p.fetch_quarterly_financials_batch("2308", max_quarters=20)
         assert rows[0]["fiscal_quarter"] == "2026Q2"
-        assert rows[0]["eps"] == 5.0
+        assert rows[0]["eps"] == 17.59
+        assert rows[0]["gross_margin"] == 36.27
+        # ROE = net_income / total_equity
+        assert abs(rows[0]["roe"] - (51003600000 / 350224892000 * 100)) < 0.01
+        assert p.last_source == "mcp"
+
+    def test_quarterly_financials_mcp_error_falls_back(self):
+        # mcp 報錯（如 2330 無損益表資料）→ 降級 yfinance fallback，不重複 normalize
+        p, fb = self._make(fail_tools={"get_financial_statements"})
+        fb.fetch_quarterly_financials_batch = lambda sid, max_quarters=20: [
+            {"stock_id": sid, "fiscal_quarter": "2026Q2", "eps": 27.25,
+             "revenue": 100, "gross_margin": 50.0, "roe": 10.98, "roa": 7.54}
+        ]
+        rows = p.fetch_quarterly_financials_batch("2330", max_quarters=20)
+        assert len(rows) == 1
+        assert rows[0]["fiscal_quarter"] == "2026Q2"
+        assert rows[0]["roe"] == 10.98  # 未重複 normalize
+        assert p.last_source == "direct(fallback)"
+
+    def test_dividends_fallback_no_double_normalize(self):
+        # fallback（yfinance）已含西元年，不應再被民國→西元轉換（曾致 2026→3937）
+        p, fb = self._make(fail_tools={"get_dividend_history"})
+        fb.fetch_dividends = lambda sid: [
+            {"stock_id": sid, "year": 2026, "ex_date": "2026-03-17",
+             "cash_dividend": 12.0, "cash_yield": 0.64}
+        ]
+        rows = p.fetch_dividends("0050")
+        assert rows[0]["year"] == 2026  # 不是 3937
+        assert rows[0]["cash_dividend"] == 12.0
+        assert p.last_source == "direct(fallback)"
 
 
 class TestMcpClientUnit:
