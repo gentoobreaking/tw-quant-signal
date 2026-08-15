@@ -2,6 +2,16 @@
 
 **台股 AI 量化訊號系統** — 資料驅動的四燈號健診、多時間框架掃描與自動化監控。
 
+## Snapshots
+
+![Overview](snapshots/1_overview.png)
+![四燈號健診](snapshots/2_四燈號健診.png)
+![多時間框架共識&大指標多空計分卡](snapshots/3_多時間框架共識_11 大指標多空計分卡.png)
+![股價走勢](snapshots/4_股價走勢.png)
+![四面向健診細項](snapshots/5_四面向健診細項.png)
+![觸發規則](snapshots/6_觸發規則.png)
+![規則與比重管理](snapshots/7_規則與比重管理.png)
+
 ## Overview
 
 ```
