@@ -9,7 +9,7 @@
         "path": "data/signal.db"
     },
     "data_provider": {
-        "mode": "direct",
+        "mode": "mcp",
         "mcp_server_path": "",
         "mcp_timeout_sec": 30,
         "fallback_on_error": true

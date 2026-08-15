@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Sidebar from './components/Sidebar'
 import StockObservation from './pages/StockObservation'
 import RulesManagement from './pages/RulesManagement'
+import PerformanceTracking from './pages/PerformanceTracking'
 import { api } from './api/client'
 import type { Page } from './types'
 
@@ -32,6 +33,7 @@ function AppShell() {
       />
       <div className="main-content">
         {page === 'observation' && <StockObservation selectedStockId={selectedStock} />}
+        {page === 'performance' && <PerformanceTracking />}
         {page === 'rules' && <RulesManagement />}
       </div>
     </div>

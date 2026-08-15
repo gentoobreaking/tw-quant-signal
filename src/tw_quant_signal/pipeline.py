@@ -16,6 +16,7 @@ from tw_quant_signal.risk_manager import compute_risk_metrics, RISK_LEVELS
 from tw_quant_signal.indicators import compute_weekly_indicators, compute_monthly_indicators
 from tw_quant_signal.multi_timeframe import compute_multi_timeframe
 from tw_quant_signal.signal_scorecard import compute_all_scorecards, build_scorecard_rows, scorecard_to_markdown
+from tw_quant_signal.performance_tracker import compute_performance_log, compute_agg_stats
 from tw_quant_signal.structural_change import compute_all_drift, store_drift_results, generate_structural_change_report
 from tw_quant_signal.env_manager import is_production_mode, get_summary, filter_rules_for_production
 from tw_quant_signal.operation_log import (
@@ -247,6 +248,33 @@ def main():
         send_rules_report(rules_result)
     else:
         print("  ⚠ 無規則訊號產出")
+
+    # T019: 績效追蹤 — 為今日新增的規則觸發產生 1/3/5/10 日 performance_log
+    try:
+        new_perf = compute_performance_log(db, trade_date=run_date, rewrite=False)
+        if new_perf:
+            print(f"  → 績效追蹤: 更新 {len(new_perf)} 筆 (D+1/3/5/10 淨報酬)")
+            status["performance_tracking"] = "ok"
+        else:
+            # 即使沒有新觸發，也要確保舊筆持有期資料隨日期遞補
+            refreshed = compute_performance_log(db, trade_date=run_date, rewrite=False)
+            print(f"  → 績效追蹤: 無新觸發，補齊 {len(refreshed)} 筆持有期資料")
+            status["performance_tracking"] = "ok"
+    except Exception as e:
+        print(f"  ✗ 績效追蹤失敗: {e}")
+        status["performance_tracking"] = "fail"
+
+    # T019: 聚合績效（30 日）後建構 stats + Markdown，供 daily report 使用
+    try:
+        from datetime import date as _date, timedelta as _timedelta
+        cutoff = (_date.today() - _timedelta(days=30)).isoformat()
+        agg = compute_agg_stats(db, from_date=cutoff, horizon=5)
+        if agg["overview"]["triggers"] > 0:
+            print(f"  → 績效統計 (30 日, 5d): 觸發 {agg['overview']['triggers']}, "
+                  f"勝率 {agg['overview']['win_rate']*100:.1f}%, "
+                  f"平均報酬 {agg['overview']['avg_return']*100:+.2f}%")
+    except Exception as e:
+        print(f"  ⚠ 績效聚合失敗: {e}")
 
     # Generate report files
     md_path = generate_markdown_report(db, run_date)

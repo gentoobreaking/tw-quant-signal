@@ -319,6 +319,27 @@ def _init_schema(conn: sqlite3.Connection):
             PRIMARY KEY (trade_date, stock_id)
         );
 
+        -- T019: 訊號績效追蹤表
+        -- 每條 (stock_id, rule_id, trigger_date) 規則觸發，紀錄觸發時收盤 + 後 1/3/5/10 日的
+        -- net（扣交易成本後）報酬，便於計算勝率、盈虧比、最大回撤、連續虧損等統計。
+        CREATE TABLE IF NOT EXISTS performance_log (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            stock_id          TEXT NOT NULL,
+            rule_id           TEXT NOT NULL,
+            trigger_date      TEXT NOT NULL,
+            market_state      TEXT,
+            close_at_trigger  REAL,
+            after_1d_return   REAL,
+            after_3d_return   REAL,
+            after_5d_return   REAL,
+            after_10d_return  REAL,
+            inspection_date   TEXT,
+            UNIQUE(stock_id, rule_id, trigger_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_perf_log_trigger ON performance_log(trigger_date);
+        CREATE INDEX IF NOT EXISTS idx_perf_log_rule ON performance_log(rule_id);
+        CREATE INDEX IF NOT EXISTS idx_perf_log_stock ON performance_log(stock_id);
+
         CREATE INDEX IF NOT EXISTS idx_operation_log ON operation_log(log_date, action);
     """)
 
@@ -1014,6 +1035,82 @@ class SignalDB:
                     "bearish_detail": json.loads(r[5]),
                 })
             return out
+
+    # --- T019: performance_log helpers ---
+
+    def get_performance_logs(self, from_date: str = None, to_date: str = None,
+                             rule_id: str = None, stock_id: str = None,
+                             market_state: str = None) -> list[dict]:
+        """查詢 performance_log，支援日期/規則/標的/市場狀態過濾。
+
+        T019：所有過濾條件均為可選；None 表示不限制。
+        """
+        clauses = []
+        params = []
+        if from_date:
+            clauses.append("trigger_date >= ?")
+            params.append(from_date)
+        if to_date:
+            clauses.append("trigger_date <= ?")
+            params.append(to_date)
+        if rule_id:
+            clauses.append("rule_id = ?")
+            params.append(rule_id)
+        if stock_id:
+            clauses.append("stock_id = ?")
+            params.append(stock_id)
+        if market_state:
+            clauses.append("market_state = ?")
+            params.append(market_state)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        sql = (f"SELECT id, stock_id, rule_id, trigger_date, market_state, "
+               f"close_at_trigger, after_1d_return, after_3d_return, "
+               f"after_5d_return, after_10d_return, inspection_date "
+               f"FROM performance_log{where} ORDER BY trigger_date ASC, stock_id, rule_id")
+        with self.connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_performance_logs_distinct_triggers(self) -> set[tuple[str, str]]:
+        """回傳已存在於 performance_log 的 (stock_id, rule_id, trigger_date) 三元組集合。
+
+        用於 compute_performance_log 階段排除已計算者（增量）。
+        """
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT stock_id, rule_id, trigger_date FROM performance_log"
+            ).fetchall()
+        return {(r[0], r[1], r[2]) for r in rows}
+
+    def upsert_performance_logs(self, rows: list[dict]):
+        """寫入或取代 performance_log 列。
+
+        T019: 主要由 performance_tracker.compute_performance_log 呼叫，採
+        UPSERT 語意（PK = (stock_id, rule_id, trigger_date) UNIQUE）。
+        """
+        if not rows:
+            return
+        with self.connect() as conn:
+            for r in rows:
+                conn.execute(
+                    "DELETE FROM performance_log "
+                    "WHERE stock_id=? AND rule_id=? AND trigger_date=?",
+                    [r["stock_id"], r["rule_id"], r["trigger_date"]],
+                )
+                conn.execute(
+                    """INSERT INTO performance_log
+                       (stock_id, rule_id, trigger_date, market_state,
+                        close_at_trigger, after_1d_return, after_3d_return,
+                        after_5d_return, after_10d_return, inspection_date)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [
+                        r["stock_id"], r["rule_id"], r["trigger_date"],
+                        r.get("market_state"), r.get("close_at_trigger"),
+                        r.get("after_1d_return"), r.get("after_3d_return"),
+                        r.get("after_5d_return"), r.get("after_10d_return"),
+                        r.get("inspection_date"),
+                    ],
+                )
 
     def cleanup_structural_drift(self, days: int = 90) -> int:
         """清理 structural_drift 表中超過指定天數的記錄。

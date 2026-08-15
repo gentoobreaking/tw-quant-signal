@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -15,6 +15,24 @@ from tw_quant_signal.config import settings
 from tw_quant_signal.multi_timeframe import compute_multi_timeframe
 
 app = FastAPI(title="tw-quant-signal API", version="1.0.0", on_startup=[lambda: _get_db().init_db()])
+
+@app.websocket("/ws/alerts")
+async def ws_alerts(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            await websocket.receive_text()
+    except Exception:
+        pass
+
+@app.websocket("/ws/quotes")
+async def ws_quotes(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            await websocket.receive_text()
+    except Exception:
+        pass
 
 app.add_middleware(
     CORSMiddleware,
@@ -544,6 +562,80 @@ def stock_scorecard(stock_id: str):
         "bearish": dict(r["bearish_detail"], count=r["bearish_score"], ratio=f"{r['bearish_score']}/11"),
     }
     return {"data": sc}
+
+
+# ---- T019: 績效追蹤 ----
+
+@app.get("/api/performance/rules")
+def performance_rules(days: int = Query(default=30, ge=1, le=365),
+                     horizon: int = Query(default=5, ge=1, le=10),
+                     market_state: str = Query(default=None, pattern="^(bull|bear|range|unknown)$")):
+    """T019: 每條規則的胜率/均酬/貲損比/最大DD/連違虧損 Markdown 表格。"""
+    from datetime import date as _date, timedelta as _timedelta
+    from tw_quant_signal.performance_tracker import compute_agg_stats
+    db = _get_db()
+    if days:
+        cutoff = (_date.today() - _timedelta(days=days)).isoformat()
+    else:
+        cutoff = None
+    stats = compute_agg_stats(db, from_date=cutoff, horizon=horizon)
+    filtered = stats
+    if market_state:
+        filtered = {
+            **stats,
+            "rules": {
+                rid: info for rid, info in stats["rules"].items()
+                if market_state in info["by_state"]
+            },
+        }
+    return {"data": filtered}
+
+
+@app.get("/api/performance/overview")
+def performance_overview(days: int = Query(default=30, ge=1, le=365),
+                         horizon: int = Query(default=5, ge=1, le=10)):
+    """T019: 整體系統績效概。"""
+    from datetime import date as _date, timedelta as _timedelta
+    from tw_quant_signal.performance_tracker import compute_agg_stats
+    db = _get_db()
+    cutoff = (_date.today() - _timedelta(days=days)).isoformat()
+    stats = compute_agg_stats(db, from_date=cutoff, horizon=horizon)
+    overview = stats["overview"]
+    return {"data": {
+        "horizon": horizon,
+        "days": days,
+        "from_date": stats["from_date"],
+        "to_date": stats["to_date"],
+        "total_triggers": overview["triggers"],
+        "win_rate": overview["win_rate"],
+        "avg_return": overview["avg_return"],
+        "avg_win": overview["avg_win"],
+        "avg_loss": overview["avg_loss"],
+        "profit_ratio": overview["profit_ratio"],
+        "max_dd": overview["max_dd"],
+        "consecutive_losses": overview["max_consecutive_losses"],
+        "expectancy": overview["expectancy"],
+        "by_state": overview["by_state"],
+    }}
+
+
+@app.get("/api/performance/logs")
+def performance_logs(days: int = Query(default=30, ge=1, le=365),
+                     rule_id: str = Query(default=None),
+                     stock_id: str = Query(default=None),
+                     market_state: str = Query(default=None, pattern="^(bull|bear|range|unknown)$")):
+    """T019: 原始 performance_log 記錄明細 (供前端表格使用)。"""
+    from datetime import date as _date, timedelta as _timedelta
+    db = _get_db()
+    cutoff = (_date.today() - _timedelta(days=days)).isoformat()
+    rows = db.get_performance_logs(
+        from_date=cutoff,
+        rule_id=rule_id,
+        stock_id=stock_id,
+        market_state=market_state,
+    )
+    rows.reverse()  # 由近至遠
+    return {"data": rows}
 
 
 # ---- Serve frontend ----

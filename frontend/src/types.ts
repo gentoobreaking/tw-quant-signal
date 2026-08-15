@@ -136,4 +136,57 @@ export interface Rule {
   weight?: number
 }
 
-export type Page = 'observation' | 'rules'
+// T019: 訊號績效追蹤
+export interface PerformanceAgg {
+  triggers: number
+  wins: number
+  losses: number
+  win_rate: number
+  avg_return: number
+  avg_win: number
+  avg_loss: number
+  profit_ratio: number
+  max_dd: number
+  max_consecutive_losses: number
+  expectancy: number
+}
+
+export interface PerformanceRuleEntry {
+  name: string
+  type: string
+  stats: PerformanceAgg
+  by_state: Record<string, PerformanceAgg>
+}
+
+export interface PerformanceOverview {
+  horizon: number
+  days: number
+  from_date: string
+  to_date: string | null
+  total_triggers: number
+  win_rate: number
+  avg_return: number
+  avg_win: number
+  avg_loss: number
+  profit_ratio: number
+  max_dd: number
+  consecutive_losses: number
+  expectancy: number
+  by_state: Record<string, PerformanceAgg>
+}
+
+export interface PerformanceLog {
+  id: number
+  stock_id: string
+  rule_id: string
+  trigger_date: string
+  market_state: string | null
+  close_at_trigger: number | null
+  after_1d_return: number | null
+  after_3d_return: number | null
+  after_5d_return: number | null
+  after_10d_return: number | null
+  inspection_date: string | null
+}
+
+export type Page = 'observation' | 'rules' | 'performance'
