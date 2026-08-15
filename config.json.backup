@@ -1,5 +1,5 @@
 {
-    "watch_stocks": ["2330", "0050", "2308", "2303", "2317", "2454", "3008", "2881", "2882", "6505", "6518"],
+    "watch_stocks": ["2330", "0050", "2308"],
     "notification": {
         "telegram_bot_token": "",
         "telegram_chat_id": "",

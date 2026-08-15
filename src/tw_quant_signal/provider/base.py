@@ -16,6 +16,8 @@ class DataProvider(ABC):
     @property
     def watch_stocks(self) -> list[str]:
         """觀察標的清單（預設來自 config；子類可覆寫注入）。"""
+        if hasattr(self, "_watch_stocks") and self._watch_stocks is not None:
+            return list(self._watch_stocks)
         return list(WATCH_STOCKS)
 
     @abstractmethod

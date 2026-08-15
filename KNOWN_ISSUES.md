@@ -1,5 +1,22 @@
 # KNOWN_ISSUES
 
+## T023 — MCP Validation & Fallback 已知問題與決策記錄
+
+### 1. MCP Server 未部署環境下的測試限制
+- T023 驗證測試在無 tw-quant-mcp 執行檔環境下，mcp/hybrid 模式會全部降級至 direct
+- 資料一致性比對通過（因實際皆走 direct），但無法驗證真實 mcp 回傳格式
+- S3.2 (部分工具失敗) 需在有 tw-quant-mcp 環境下手動驗證
+
+### 2. MCP Symbol Registry 與 ETF/指數支援
+- tw-quant-mcp Symbol Registry 僅含上市/上櫃股票（4-6 位數字代號）
+- ETF（如 0050）與指數（^TWII）不在 Registry → `HybridDataProvider`/`McpDataProvider` 自動降級 direct
+- 此為設計預期，非 bug；`fetch_watch_stocks_prices` 會逐檔檢查並降級
+
+### 3. 月營收增量同步與 mcp L2 快取
+- `fetch_monthly_revenue_batch(incremental=True)` 在 mcp 模式下：mcp 端有 L2 快取（同 symbol 呼叫命中 cache）
+- direct 模式增量邏輯依賴 DB 缺月份判斷，mcp 模式則由 mcp 端回傳全量再截取最近 N 月
+- 兩模式資料結果一致，但請求行為不同（mcp 較多 cache hit、較少 HTTP）
+
 ## T022 — MOPS 遷移至 tw-quant-mcp 已知問題與決策記錄
 
 ### 1. 季報（financials）mcp 覆蓋缺口 → YfinanceProvider 保留（S3 結論）

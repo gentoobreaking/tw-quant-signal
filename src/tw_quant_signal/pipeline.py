@@ -313,6 +313,14 @@ def main():
         traceback.print_exc()
         status["structural_drift"] = "fail"
 
+    # Cleanup old structural_drift records (>90 days)
+    try:
+        deleted = db.cleanup_structural_drift(days=90)
+        if deleted > 0:
+            print(f"  → 清理 structural_drift 表: 刪除 {deleted} 筆超過 90 天的記錄")
+    except Exception as e:
+        print(f"  ⚠ structural_drift 清理失敗: {e}")
+
     print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 管線完成")
     return 0 if all_ok else 1
 

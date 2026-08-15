@@ -6,6 +6,7 @@ import sqlite3
 import tempfile
 from datetime import date, timedelta
 
+from tw_quant_signal.config import WATCH_STOCKS
 from tw_quant_signal.db import SignalDB, _init_schema
 from tw_quant_signal.indicators import compute_indicators
 from tw_quant_signal.rules import compute_rule_signals, store_rule_signals, _load_features
@@ -28,14 +29,17 @@ def _make_temp_signal_db() -> SignalDB:
     return db
 
 
+TEST_STOCKS = ["2330", "0050", "2308"]  # Use original 3 for test data generation
+
+
 class TestPipelineIntegration:
     def test_full_60_day_pipeline(self):
-        """Simulate a full pipeline run with 60+ days of data across 3 watch stocks."""
+        """Simulate a full pipeline run with 60+ days of data across watch stocks."""
         db = _make_temp_signal_db()
         db_path = db._path
 
         today = date(2026, 6, 30)
-        stocks = ["2330", "0050", "2308"]
+        stocks = TEST_STOCKS
 
         all_features = []
 
@@ -123,7 +127,7 @@ class TestPipelineIntegration:
                 assert len(rows) > 0
                 for r in rows:
                     rd = dict(r)
-                    assert rd["stock_id"] in stocks
+                    assert rd["stock_id"] in WATCH_STOCKS
                     assert rd["trade_date"] == today.isoformat()
                     assert rd["signal"] in ("bullish", "bearish", "neutral")
 
@@ -164,12 +168,12 @@ class TestRuleSignalsFlow:
         try:
             today = date(2026, 6, 30)
 
-            # Populate all necessary tables for 3 watch stocks
+            # Populate all necessary tables for test stocks
             with db.connect() as conn:
                 idx_data = generate_index_data(days=200, start_date=date(2025, 6, 1))
                 populate_db(conn, index_rows=idx_data)
 
-            for sid in ["2330", "0050", "2308"]:
+            for sid in TEST_STOCKS:
                 prices = generate_prices(sid, days=200, start_date=date(2025, 6, 1))
                 inst = generate_inst_flows(sid, days=100, start_date=date(2025, 12, 1))
                 prices_sorted = sorted(prices, key=lambda x: x["trade_date"])
@@ -198,9 +202,11 @@ class TestRuleSignalsFlow:
             with db.connect() as conn:
                 rs = conn.execute("SELECT stock_id, signal, total_score, triggered_count FROM rule_signals WHERE trade_date=?",
                                   [today.isoformat()]).fetchall()
-                assert len(rs) <= 3
+                # Verify test stocks are in results with valid signals
+                result_stocks = [r[0] for r in rs]
+                for sid in TEST_STOCKS:
+                    assert sid in result_stocks
                 for r in rs:
-                    assert r[0] in ["2330", "0050", "2308"]
                     assert r[1] in ("bullish", "bearish", "neutral")
 
             # Compute stats

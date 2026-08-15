@@ -35,6 +35,7 @@ def _init_schema(conn: sqlite3.Connection):
             adj_close   REAL,
             PRIMARY KEY (stock_id, trade_date)
         );
+        CREATE INDEX IF NOT EXISTS idx_daily_date_stock ON daily_prices(trade_date, stock_id);
 
         CREATE TABLE IF NOT EXISTS market_index (
             trade_date  TEXT PRIMARY KEY,
@@ -54,6 +55,7 @@ def _init_schema(conn: sqlite3.Connection):
             total_net              INTEGER,
             PRIMARY KEY (stock_id, trade_date)
         );
+        CREATE INDEX IF NOT EXISTS idx_inst_flows_date_stock ON institutional_flows(trade_date, stock_id);
 
         CREATE TABLE IF NOT EXISTS signals (
             trade_date   TEXT NOT NULL,
@@ -1012,3 +1014,20 @@ class SignalDB:
                     "bearish_detail": json.loads(r[5]),
                 })
             return out
+
+    def cleanup_structural_drift(self, days: int = 90) -> int:
+        """清理 structural_drift 表中超過指定天數的記錄。
+
+        Args:
+            days: 保留天數（預設 90 天）
+
+        Returns:
+            刪除的記錄數
+        """
+        from datetime import date, timedelta
+        cutoff = (date.today() - timedelta(days=days)).isoformat()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM structural_drift WHERE trade_date < ?", [cutoff]
+            )
+            return cursor.rowcount

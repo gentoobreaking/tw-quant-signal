@@ -9,6 +9,7 @@
 
 
 import pytest
+from unittest import mock
 
 from tw_quant_signal.provider.mcp_client import McpConnectionError
 from tw_quant_signal.provider.mcp_provider import McpDataProvider
@@ -96,23 +97,25 @@ class _FakeFallback:
 
 
 class TestMcpDataProviderT021:
-    def _make(self, results=None, fail_tools=None):
+    def _make(self, results=None, fail_tools=None, watch_stocks=None):
         fb = _FakeFallback()
         from tw_quant_signal.provider.mcp_client import McpConnectionError, McpToolError
         p = McpDataProvider.__new__(McpDataProvider)
         p._McpConnectionError = McpConnectionError
         p._McpToolError = McpToolError
         results = dict(results or {})
-        # 預設 Symbol Registry：2330/2308 上市，0050 不在（ETF）
+        # 預設 Symbol Registry：2330/2308/0050（ETF 現在支援 6 碼 00 開頭）
         results.setdefault("get_symbol_list",
-            {"data": [{"code": "2330"}, {"code": "2308"}]})
+            {"data": [{"code": "2330"}, {"code": "2308"}, {"code": "0050"}]})
+        # get_twse_index 預設回傳
+        results.setdefault("get_twse_index",
+            {"data": {"date": "2026-08-10", "close": 44928.76, "change_percent": 1.59, "history": []}})
         p._client = _FakeClient(results, fail_tools)
         p._fallback = fb
         p._last_source = None
         p._last_fallback_reason = None
         p._symbols = None
-        # 直接寫 instance dict 覆蓋唯讀 property（測試用）
-        vars(p)["watch_stocks"] = ["2330", "0050", "2308"]
+        p._watch_stocks = watch_stocks or ["2330", "0050", "2308"]
         return p, fb
 
     # ---- 成功路徑（mcp 原生） ----
@@ -125,15 +128,20 @@ class TestMcpDataProviderT021:
                 "2308": {"data": {"symbol": "2308", "name": "台達電",
                     "date": "2026-08-11", "open": 1835, "high": 1865, "low": 1785,
                     "close": 1805, "volume": 18963715, "amount": 34503930330}},
+                "0050": {"data": {"symbol": "0050", "name": "元大台灣50",
+                    "date": "2026-08-11", "open": 103.9, "high": 104.75, "low": 103.5,
+                    "close": 104.25, "volume": 82086387, "amount": 8557758998}},
             },
         })
         rows = p.fetch_watch_stocks_prices()
-        assert len(rows) == 3  # 2330 + 0050（降級）+ 2308
+        assert len(rows) == 3  # 2330 + 0050 + 2308
         assert rows[0]["stock_id"] == "2330"
-        assert rows[1]["stock_id"] == "0050"  # ETF 降級 direct
+        assert rows[1]["stock_id"] == "0050"
         assert rows[1]["close"] == 104.25
         assert rows[2]["stock_id"] == "2308"
         assert p.last_source == "mcp"
+        tools = [c[0] for c in p._client.calls]
+        assert "get_stock_daily_quote" in tools
 
     def test_valuation_success(self):
         p, fb = self._make(results={
@@ -170,43 +178,79 @@ class TestMcpDataProviderT021:
                     "margin_sell": 797000, "margin_balance": 9053000, "short_sell": 4000,
                     "short_buy": 8000, "short_balance": 47000},
                     "_lineage": {"data_date": "2026-08-11"}},
+                "0050": {"data": {"code": "0050", "margin_buy": 100000,
+                    "margin_sell": 50000, "margin_balance": 5000000, "short_sell": 0,
+                    "short_buy": 0, "short_balance": 0},
+                    "_lineage": {"data_date": "2026-08-11"}},
             },
         })
         rows = p.fetch_margin_trading_detailed()
-        assert len(rows) == 2  # 2330 + 2308（0050 降級）
-        assert rows[0]["trade_date"] == "2026-08-11"  # 從 lineage 補
+        assert len(rows) == 3  # 2330 + 2308 + 0050（ETF 現在支援）
+        assert rows[0]["trade_date"] == "2026-08-11"
         assert rows[0]["margin_balance"] == 29070000
+        # last_source 為最後一檔(0050)，但 0050 也在 registry 所以也是 mcp
         assert p.last_source == "mcp"
 
     # ---- 降級路徑（連線失敗 → fallback） ----
     def test_fallback_on_connection_error(self):
         p, fb = self._make(fail_tools={"get_valuation_ratios"})
         val = p.fetch_valuations(["2330"])
-        assert val["2330"]["pe_ratio"] == 32.0  # fallback 資料
+        assert val["2330"]["pe_ratio"] == 32.0
         assert p.last_source == "direct(fallback)"
         assert "get_valuation_ratios" in (p.last_fallback_reason or "")
 
-    def test_etf_auto_fallback(self):
-        """0050（ETF）非 mcp Symbol Registry → 自動降級 direct。"""
-        p, fb = self._make()
+    def test_etf_now_supported(self):
+        """0050（ETF）現在在 Symbol Registry 中，走 mcp 不降級。"""
+        p, fb = self._make(results={
+            "get_stock_daily_quote": {
+                "2330": {"data": {"symbol": "2330", "name": "台積電",
+                    "date": "2026-08-11", "open": 2390, "high": 2405, "low": 2375,
+                    "close": 2395, "volume": 18247582, "amount": 43667182348}},
+                "2308": {"data": {"symbol": "2308", "name": "台達電",
+                    "date": "2026-08-11", "open": 1835, "high": 1865, "low": 1785,
+                    "close": 1805, "volume": 18963715, "amount": 34503930330}},
+                "0050": {"data": {"symbol": "0050", "name": "元大台灣50",
+                    "date": "2026-08-11", "open": 103.9, "high": 104.75, "low": 103.5,
+                    "close": 104.25, "volume": 82086387, "amount": 8557758998}},
+            },
+        })
         rows = p.fetch_watch_stocks_prices()
-        # 0050 走 fallback（fake 回傳 0050 列）；2330/2308 mcp 無結果不產生列
-        assert len(rows) == 1 and rows[0]["stock_id"] == "0050"
-        assert "fetch_watch_stocks_prices" in fb.calls
-        # 2330/2308 無 mcp 資料（fake 空結果）不產生列；0050 降級有資料
-        assert p.last_source == "direct(fallback)"
+        assert len(rows) == 3
+        assert any(r["stock_id"] == "0050" for r in rows)
+        assert p.last_source == "mcp"
+        assert "fetch_watch_stocks_prices" not in fb.calls  # 沒降級
 
-    def test_index_always_fallback(self):
+    def test_index_now_mcp(self):
+        """指數現在走 get_twse_index 工具。"""
         p, fb = self._make()
         idx = p.fetch_market_index()
         assert idx["close"] == 44928.76
-        assert p.last_source == "direct(fallback)"
+        assert p.last_source == "mcp"
+        # 驗證呼叫了 get_twse_index
+        tools = [c[0] for c in p._client.calls]
+        assert "get_twse_index" in tools
 
-    def test_hist_index_always_fallback(self):
-        p, fb = self._make()
+    def test_hist_index_now_mcp(self):
+        """指數歷史資料現在走 get_twse_index 工具。"""
+        p, fb = self._make(results={
+            "get_twse_index": {
+                "data": {
+                    "date": "2026-08-10",
+                    "close": 44928.76,
+                    "change_percent": 1.59,
+                    "history": [
+                        {"date": "2026-08-10", "open": 44800, "high": 45000, "low": 44700, "close": 44928.76},
+                        {"date": "2026-08-09", "open": 44600, "high": 44850, "low": 44500, "close": 44750.00},
+                    ]
+                }
+            }
+        })
         rows = p.fetch_historical_index(years=1)
+        assert len(rows) >= 1
         assert rows[0]["trade_date"] == "2026-08-10"
-        assert p.last_source == "direct(fallback)"
+        assert p.last_source == "mcp"
+        tools = [c[0] for c in p._client.calls]
+        assert "get_twse_index" in tools
 
     def test_hist_daily_fallback(self):
         p, fb = self._make(fail_tools={"get_stock_daily_kline"})

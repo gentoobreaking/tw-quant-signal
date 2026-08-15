@@ -110,9 +110,14 @@ class McpDataProvider(DataProvider):
         """tw-quant-mcp 是否支援該代號。
 
         上市/上櫃股票（4-6 位數字代號）且已註冊於 Symbol Registry；
-        ETF（如 0050）、指數（^TWII）未註冊，需降級 TwseDirectProvider（S5）。
+        ETF（如 0050，6 碼 00 開頭）已納入 Registry；
+        指數（^TWII）走 get_twse_index 工具，不需 Registry。
         Registry 查詢失敗時退化為格式檢查（不阻斷降級機制）。
         """
+        # 指數走專用工具，不需 Registry
+        if sid == "^TWII":
+            return True
+        # 4-6 位數字：股票或 ETF（0050 等 6 碼 00 開頭）
         if not (sid.isdigit() and 4 <= len(sid) <= 6):
             return False
         if self._symbols is None:
@@ -175,10 +180,18 @@ class McpDataProvider(DataProvider):
         return None
 
     def fetch_market_index(self) -> dict | None:
-        # 指數未註冊於 mcp Symbol Registry → 一律降級 direct
-        # （mcp 的 get_market_summary 無指數收盤價欄位）
-        self._last_source = "direct(fallback)"
-        self._last_fallback_reason = "get_stock_daily_quote: symbol ^TWII 非上市/上櫃，mcp 不支援"
+        # 使用 get_twse_index 工具（T032 新增）
+        try:
+            out = self._call("get_twse_index", {"symbol": "發行量加權股價指數"})
+            payload = out.get("data") if isinstance(out.get("data"), dict) else out
+            if isinstance(payload, dict) and payload.get("close") is not None:
+                self._last_source = "mcp"
+                self._last_fallback_reason = None
+                return norm.normalize_market_index(payload)
+        except (self._McpConnectionError, self._McpToolError) as exc:
+            logger.warning("MCP get_twse_index 失敗，降級至 direct: %s", exc)
+            self._last_source = "direct(fallback)"
+            self._last_fallback_reason = f"get_twse_index: {exc}"
         return self._fallback.fetch_market_index()
 
     def fetch_institutional_flows(self, trade_date: str | None = None) -> list[dict]:
@@ -293,9 +306,29 @@ class McpDataProvider(DataProvider):
         return rows
 
     def fetch_historical_index(self, years: int = 5) -> list[dict]:
-        # 指數未註冊於 mcp Symbol Registry → 一律降級 direct
-        self._last_source = "direct(fallback)"
-        self._last_fallback_reason = "get_stock_daily_kline: symbol ^TWII 非上市/上櫃，mcp 不支援"
+        # 使用 get_twse_index 取得歷史資料（包含 history 欄位）
+        try:
+            from datetime import date, timedelta
+            end_date = date.today().isoformat()
+            start_date = (date.today() - timedelta(days=years * 365)).isoformat()
+            out = self._call("get_twse_index", {"symbol": "發行量加權股價指數", "date": end_date})
+            payload = out.get("data") if isinstance(out.get("data"), dict) else out
+            self._last_source = "mcp"
+            self._last_fallback_reason = None
+            if isinstance(payload, dict) and payload.get("history"):
+                # 過濾日期範圍
+                history = payload["history"]
+                filtered = [
+                    h for h in history
+                    if start_date <= h.get("date", "") <= end_date
+                ]
+                return norm.normalize_historical_index(filtered)
+            # 成功呼叫但無歷史資料，回傳空列表
+            return []
+        except (self._McpConnectionError, self._McpToolError) as exc:
+            logger.warning("MCP get_twse_index 歷史資料失敗，降級至 direct: %s", exc)
+            self._last_source = "direct(fallback)"
+            self._last_fallback_reason = f"get_twse_index history: {exc}"
         return self._fallback.fetch_historical_index(years=years)
 
     # ------------------------------------------------------------------ #

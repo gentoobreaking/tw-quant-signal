@@ -44,16 +44,17 @@ def normalize_daily_quote(data: dict, stock_id: str) -> dict:
 
 
 def normalize_market_index(data: dict) -> dict | None:
-    """get_stock_daily_quote("^TWII") / get_market_summary → market_index 列。"""
+    """get_twse_index (IndexView) → market_index 列。"""
     if not data:
         return None
-    close = _pick(data, "close")
+    # get_twse_index 回傳 IndexView: {name, date, close, change, change_percent, ...}
+    close = data.get("close")
     if close is None:
         return None
     return {
-        "trade_date": _pick(data, "date", "timestamp", default=""),
+        "trade_date": data.get("date", ""),
         "close": close,
-        "change_pct": _pick(data, "change_pct"),
+        "change_pct": data.get("change_percent"),
     }
 
 
@@ -137,11 +138,11 @@ def normalize_daily_kline(data: list, stock_id: str) -> list[dict]:
 
 
 def normalize_historical_index(data: list) -> list[dict]:
-    """get_stock_daily_kline("^TWII") Candle[] → market_index 列。"""
+    """get_twse_index IndexDay[] → market_index 列。"""
     results = []
     for c in data or []:
         results.append({
-            "trade_date": c.get("timestamp", ""),
+            "trade_date": c.get("date", ""),
             "close": c.get("close"),
             "change_pct": None,
         })

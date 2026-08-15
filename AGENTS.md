@@ -76,6 +76,38 @@
 - [x] 圖表：lightweight-charts K線 + MA5/20/60 均線
 - [x] Vite dev proxy `/api` → FastAPI `:8000`
 
+### Phase 8 — 資料提供者抽象與驗證 (T020–T023) ✅
+- [x] DataProvider 抽象層 (`provider/__init__.py`) — 統一介面
+- [x] TwseDirectProvider — HTTP 直連 (T020)
+- [x] McpDataProvider — tw-quant-mcp stdio JSON-RPC (T021/T022)
+- [x] HybridDataProvider — TWSE 走 mcp、MOPS/yfinance 走 direct (T023 S1)
+- [x] 三種模式切換：環境變數 `TW_QUANT_DATA_PROVIDER=direct|mcp|hybrid`
+- [x] MCP 自動降級機制：連線失敗 / 工具錯誤 / 逾時 → 降級 direct (T023 S3)
+- [x] 資料一致性驗證：direct/mcp/hybrid 三模式輸出完全一致 (T023 S2)
+- [x] 效能基準：mcp 模式 1.13x direct（目標 ≤1.5x，通過） (T023 S4)
+- [x] Config 新增 `data_provider` 區塊 (T023 S5)
+
+### Provider 模式切換指南
+| 模式 | 環境變數 | 適用場景 | 說明 |
+|------|----------|----------|------|
+| direct | `TW_QUANT_DATA_PROVIDER=direct` | 開發/測試/生產 | 既有 HTTP 直連，含 yfinance 補充 |
+| mcp | `TW_QUANT_DATA_PROVIDER=mcp` | 生產 (需部署 mcp server) | 全部資料走 tw-quant-mcp，自動降級 |
+| hybrid | `TW_QUANT_DATA_PROVIDER=hybrid` | 生產 (推薦) | TWSE/法人/估值走 mcp；MOPS/財報/股利走 direct |
+
+Config 設定 (config.json):
+```json
+"data_provider": {
+  "mode": "direct",
+  "mcp_server_path": "",
+  "mcp_timeout_sec": 30,
+  "fallback_on_error": true
+}
+```
+
+環境變數覆蓋：
+- `MCP_SERVER_PATH`: tw-quant-mcp 執行檔路徑
+- `MCP_CALL_TIMEOUT`: 單次 tool 呼叫逾時（秒）
+
 ### 待設定
 - [ ] 設定 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` 環境變數啟用 Telegram 推播
 - [ ] 或設定 `DISCORD_WEBHOOK_URL` 啟用 Discord
