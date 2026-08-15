@@ -109,21 +109,28 @@ Config 設定 (config.json):
 - `MCP_CALL_TIMEOUT`: 單次 tool 呼叫逾時（秒）
 
 ### Docker Compose 部署
-`docker-compose.yml` 已支援環境變數注入（預設 direct）：
+`docker-compose.yml` 已支援環境變數注入（預設 direct），語法 `${VAR:-default}` 表示：環境變數（含 `.env`）未設定時用預設值。
+
+**docker-compose 會自動讀取當前目錄 `.env`，不需 `--env-file` 參數。**
+
 ```bash
-# 直接啟動（direct 模式）
+# 1. 直接啟動（direct 模式，零依賴）
 docker-compose up -d
 
-# MCP 模式（需先將 tw-quant-mcp 二進位檔掛載至容器）
+# 2. MCP 模式（需先將 tw-quant-mcp 二進位檔掛載至容器）
 MCP_SERVER_PATH=/app/tw-quant-mcp TW_QUANT_DATA_PROVIDER=mcp docker-compose up -d
 
-# Hybrid 模式（推薦生產）
+# 3. Hybrid 模式（推薦生產）
 MCP_SERVER_PATH=/app/tw-quant-mcp TW_QUANT_DATA_PROVIDER=hybrid docker-compose up -d
 
-# 或使用 .env 檔（參考 .env.example）
+# 4. 使用 .env 檔（參考 .env.example）
 cp .env.example .env
 # 編輯 .env 設定 TW_QUANT_DATA_PROVIDER=hybrid 等
-docker-compose --env-file .env up -d
+docker-compose up -d          # 自動讀取 .env
+
+# 5. 環境變數優先序：export > .env > ${VAR:-default}
+export TW_QUANT_DATA_PROVIDER=mcp
+docker-compose up -d          # 以 export 為準，覆蓋 .env
 ```
 
 **MCP 二進位檔掛載方式**（三選一）：
