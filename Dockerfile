@@ -8,7 +8,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # === Stage 2: Build tw-quant-mcp ===
-FROM golang:1.22-alpine AS mcp-builder
+FROM golang:1.26.6-alpine3.24 AS mcp-builder
 
 WORKDIR /app/tw-quant-mcp
 COPY tw-quant-mcp/go.mod tw-quant-mcp/go.sum ./
