@@ -108,6 +108,29 @@ Config 設定 (config.json):
 - `MCP_SERVER_PATH`: tw-quant-mcp 執行檔路徑
 - `MCP_CALL_TIMEOUT`: 單次 tool 呼叫逾時（秒）
 
+### Docker Compose 部署
+`docker-compose.yml` 已支援環境變數注入（預設 direct）：
+```bash
+# 直接啟動（direct 模式）
+docker-compose up -d
+
+# MCP 模式（需先將 tw-quant-mcp 二進位檔掛載至容器）
+MCP_SERVER_PATH=/app/tw-quant-mcp TW_QUANT_DATA_PROVIDER=mcp docker-compose up -d
+
+# Hybrid 模式（推薦生產）
+MCP_SERVER_PATH=/app/tw-quant-mcp TW_QUANT_DATA_PROVIDER=hybrid docker-compose up -d
+
+# 或使用 .env 檔（參考 .env.example）
+cp .env.example .env
+# 編輯 .env 設定 TW_QUANT_DATA_PROVIDER=hybrid 等
+docker-compose --env-file .env up -d
+```
+
+**MCP 二進位檔掛載方式**（三選一）：
+1. **Multi-stage build**：Dockerfile 建構階段編譯 tw-quant-mcp，`COPY --from=builder /go/bin/tw-quant-mcp /app/tw-quant-mcp`
+2. **Volume mount**：`volumes: - ./tw-quant-mcp:/app/tw-quant-mcp:ro`
+3. **Sidecar service**：docker-compose 新增 `mcp` service，共享 volume 或 unix socket（需 tw-quant-mcp 支援 TCP/Unix socket 模式）
+
 ### 待設定
 - [ ] 設定 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` 環境變數啟用 Telegram 推播
 - [ ] 或設定 `DISCORD_WEBHOOK_URL` 啟用 Discord
