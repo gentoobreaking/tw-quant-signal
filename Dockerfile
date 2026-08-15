@@ -7,7 +7,16 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-# === Stage 2: Python API + Serve Static ===
+# === Stage 2: Build tw-quant-mcp ===
+FROM golang:1.22-alpine AS mcp-builder
+
+WORKDIR /app/tw-quant-mcp
+COPY tw-quant-mcp/go.mod tw-quant-mcp/go.sum ./
+RUN go mod download
+COPY tw-quant-mcp/ ./
+RUN CGO_ENABLED=0 go build -ldflags "-X main.version=docker" -o /tw-quant-mcp ./cmd/mcp-server
+
+# === Stage 3: Python API + Serve Static ===
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1
@@ -28,6 +37,7 @@ COPY scripts/ ./scripts/
 RUN pip install --no-cache-dir -e .
 
 COPY --from=frontend-builder /app/frontend/dist/ ./frontend/dist/
+COPY --from=mcp-builder /tw-quant-mcp /app/tw-quant-mcp
 
 EXPOSE 8000
 

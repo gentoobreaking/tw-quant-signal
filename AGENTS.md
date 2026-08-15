@@ -133,9 +133,9 @@ export TW_QUANT_DATA_PROVIDER=mcp
 docker-compose up -d          # 以 export 為準，覆蓋 .env
 ```
 
-**MCP 二進位檔掛載方式**（三選一）：
-1. **Multi-stage build**：Dockerfile 建構階段編譯 tw-quant-mcp，`COPY --from=builder /go/bin/tw-quant-mcp /app/tw-quant-mcp`
-2. **Volume mount**：`volumes: - ./tw-quant-mcp:/app/tw-quant-mcp:ro`
+**MCP 二進位檔整合方式**：
+1. **Multi-stage build（推薦，已實作）**：Dockerfile 建構階段編譯 tw-quant-mcp（git submodule），`COPY --from=mcp-builder /tw-quant-mcp /app/tw-quant-mcp`。鏡像自包含，無需外部掛載。
+2. **Volume mount**：`volumes: - ./tw-quant-mcp:/app/tw-quant-mcp:ro`（開發/測試用，需本地有編譯好的 binary）
 3. **Sidecar service**：docker-compose 新增 `mcp` service，共享 volume 或 unix socket（需 tw-quant-mcp 支援 TCP/Unix socket 模式）
 
 ### 待設定

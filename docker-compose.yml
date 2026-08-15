@@ -7,7 +7,7 @@ services:
       - TZ=Asia/Taipei
       - PYTHONUNBUFFERED=1
       - TW_QUANT_DATA_PROVIDER=${TW_QUANT_DATA_PROVIDER:-direct}
-      - MCP_SERVER_PATH=${MCP_SERVER_PATH:-}
+      - MCP_SERVER_PATH=/app/tw-quant-mcp
       - MCP_CALL_TIMEOUT=${MCP_CALL_TIMEOUT:-30}
     volumes:
       - ./data:/app/data
@@ -28,7 +28,7 @@ services:
       - TZ=Asia/Taipei
       - PYTHONUNBUFFERED=1
       - TW_QUANT_DATA_PROVIDER=${TW_QUANT_DATA_PROVIDER:-direct}
-      - MCP_SERVER_PATH=${MCP_SERVER_PATH:-}
+      - MCP_SERVER_PATH=/app/tw-quant-mcp
       - MCP_CALL_TIMEOUT=${MCP_CALL_TIMEOUT:-30}
     volumes:
       - ./data:/app/data
