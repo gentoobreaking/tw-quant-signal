@@ -340,6 +340,15 @@ def _init_schema(conn: sqlite3.Connection):
         CREATE INDEX IF NOT EXISTS idx_perf_log_rule ON performance_log(rule_id);
         CREATE INDEX IF NOT EXISTS idx_perf_log_stock ON performance_log(stock_id);
 
+        -- T010: 觀察清單歷史，支援存活者偏誤分析
+        CREATE TABLE IF NOT EXISTS watchlist_history (
+            stock_id       TEXT NOT NULL,
+            since_date     TEXT NOT NULL,
+            removed_date   TEXT,
+            UNIQUE(stock_id, since_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_watchlist_history_status ON watchlist_history(stock_id, removed_date);
+
         CREATE INDEX IF NOT EXISTS idx_operation_log ON operation_log(log_date, action);
     """)
 
@@ -1126,5 +1135,44 @@ class SignalDB:
         with self.connect() as conn:
             cursor = conn.execute(
                 "DELETE FROM structural_drift WHERE trade_date < ?", [cutoff]
+            )
+            return cursor.rowcount
+
+    # --- T010: watchlist_history helpers ---
+
+    def get_watchlist_history(self, include_removed: bool = True) -> list[dict]:
+        """查詢觀察清單歷史（含 removed）。
+
+        T010: 供存活者偏誤分析使用。include_removed=False 只回傳當前有效清單。
+        """
+        where = "" if include_removed else " WHERE removed_date IS NULL"
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"SELECT stock_id, since_date, removed_date FROM watchlist_history{where} "
+                "ORDER BY since_date ASC, stock_id",
+            ).fetchall()
+        return [
+            {"stock_id": r[0], "since_date": r[1], "removed_date": r[2]}
+            for r in rows
+        ]
+
+    def upsert_watchlist_history(self, stock_id: str, since_date: str):
+        """插入或重設 watchlist_history 中一個標的的起始日。"""
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO watchlist_history (stock_id, since_date) "
+                "VALUES (?, ?)",
+                [stock_id, since_date],
+            )
+
+    def mark_watchlist_removed(self, stock_ids: list[str], removed_date: str):
+        """批量標記觀察清單內的多個標的為已剔除。"""
+        if not stock_ids:
+            return 0
+        with self.connect() as conn:
+            cursor = conn.executemany(
+                "UPDATE watchlist_history SET removed_date=? "
+                "WHERE stock_id=? AND removed_date IS NULL",
+                [(removed_date, sid) for sid in stock_ids],
             )
             return cursor.rowcount

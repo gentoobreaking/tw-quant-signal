@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar'
 import StockObservation from './pages/StockObservation'
 import RulesManagement from './pages/RulesManagement'
 import PerformanceTracking from './pages/PerformanceTracking'
+import StockPool from './pages/StockPool'
 import { api } from './api/client'
 import type { Page } from './types'
 
@@ -33,6 +34,7 @@ function AppShell() {
       />
       <div className="main-content">
         {page === 'observation' && <StockObservation selectedStockId={selectedStock} />}
+        {page === 'stock_pool' && <StockPool />}
         {page === 'performance' && <PerformanceTracking />}
         {page === 'rules' && <RulesManagement />}
       </div>

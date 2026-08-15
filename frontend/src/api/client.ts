@@ -1,4 +1,4 @@
-import type { Stock, StockDetail, MarketState, HealthScore, Rule, MultiTimeframeConsensus, Scorecard, PerformanceOverview, PerformanceLog, PerformanceRuleEntry, PerformanceAgg } from '../types'
+import type { Stock, StockDetail, MarketState, HealthScore, Rule, MultiTimeframeConsensus, Scorecard, PerformanceOverview, PerformanceLog, PerformanceRuleEntry, PerformanceAgg, StockPoolOverview, StockPoolCrossCompare, StockPoolRelativeStrength } from '../types'
 
 const BASE = '/api'
 
@@ -100,4 +100,26 @@ export const api = {
     if (market_state) qs.set('market_state', market_state)
     return request<{ data: PerformanceLog[] }>(`/performance/logs?${qs.toString()}`).then(r => r.data)
   },
+
+  // T010: 個股池訊號
+  stockPoolOverview: (trade_date?: string) => {
+    const qs = new URLSearchParams()
+    if (trade_date) qs.set('trade_date', trade_date)
+    const suffix = qs.toString() ? `?${qs.toString()}` : ''
+    return request<{ data: StockPoolOverview }>(`/stock-pool/overview${suffix}`).then(r => r.data)
+  },
+  stockPoolCrossCompare: (trade_date?: string) => {
+    const qs = new URLSearchParams()
+    if (trade_date) qs.set('trade_date', trade_date)
+    const suffix = qs.toString() ? `?${qs.toString()}` : ''
+    return request<{ data: StockPoolCrossCompare }>(`/stock-pool/cross-compare${suffix}`).then(r => r.data)
+  },
+  stockPoolRelativeStrength: (trade_date?: string, benchmark = '0050') => {
+    const qs = new URLSearchParams({ benchmark })
+    if (trade_date) qs.set('trade_date', trade_date)
+    return request<{ data: StockPoolRelativeStrength }>(`/stock-pool/relative-strength?${qs.toString()}`).then(r => r.data)
+  },
+  stockPoolSectors: () => request<{ data: Array<{ stock_id: string; name: string; sector: string }> }>(
+    `/stock-pool/sectors`
+  ).then(r => r.data),
 }

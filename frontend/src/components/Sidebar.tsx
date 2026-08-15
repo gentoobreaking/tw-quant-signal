@@ -2,6 +2,7 @@ import type { Page, Stock } from '../types'
 
 const NAV: { page: Page; label: string; icon: string }[] = [
   { page: 'observation', label: '台股訊號觀察', icon: '📊' },
+  { page: 'stock_pool', label: '個股池訊號', icon: '🌐' },
   { page: 'performance', label: '訊號績效追蹤', icon: '📈' },
   { page: 'rules', label: '規則與比重管理', icon: '⚙' },
 ]

@@ -189,4 +189,66 @@ export interface PerformanceLog {
   inspection_date: string | null
 }
 
-export type Page = 'observation' | 'rules' | 'performance'
+// T010: 個股池訊號型別
+export interface StockPoolRow {
+  stock_id: string
+  name: string
+  sector: string | null
+  total_score: number | null
+  bullish_count: number | null
+  bearish_count: number | null
+  health_light: string | null
+  technical_light: string | null
+  consensus: string | null
+  rs_5d: number | null
+  rs_20d: number | null
+  rs_60d: number | null
+  rs_composite: number | null
+  rs_label: string | null
+  market_state: string | null
+  market_consistent: boolean | null
+  fundamental_light: string | null
+  institutional_light: string | null
+  valuation_light: string | null
+}
+
+export interface StockPoolCrossCompare {
+  market_state: string | null
+  consistent_count: number
+  inconsistent_count: number
+  no_data_count: number
+  consistent_stocks: string[]
+  inconsistent_stocks: string[]
+  contrarian_stocks: string[]
+  benchmark_id: string
+  as_of: string
+}
+
+export interface StockPoolOverview {
+  as_of: string
+  market_state: string | null
+  pool_size: number
+  rows: StockPoolRow[]
+  by_sector: Record<string, string[]>
+  cross_compare: StockPoolCrossCompare
+}
+
+export interface StockPoolRelativeStrength {
+  as_of: string
+  benchmark_id: string
+  rows: Array<{
+    stock_id: string
+    benchmark_id: string
+    rs_5d: number | null
+    rs_20d: number | null
+    rs_60d: number | null
+    label_5d: string | null
+    label_20d: string | null
+    label_60d: string | null
+    composite: number | null
+    composite_label: string | null
+    as_of: string
+  }>
+}
+
+export type Page = 'observation' | 'rules' | 'performance' | 'stock_pool'

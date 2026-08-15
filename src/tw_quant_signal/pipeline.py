@@ -18,6 +18,7 @@ from tw_quant_signal.multi_timeframe import compute_multi_timeframe
 from tw_quant_signal.signal_scorecard import compute_all_scorecards, build_scorecard_rows, scorecard_to_markdown
 from tw_quant_signal.performance_tracker import compute_performance_log, compute_agg_stats
 from tw_quant_signal.structural_change import compute_all_drift, store_drift_results, generate_structural_change_report
+from tw_quant_signal.stock_pool import build_stock_pool_snapshot, record_watchlist_snapshot, mark_removed
 from tw_quant_signal.env_manager import is_production_mode, get_summary, filter_rules_for_production
 from tw_quant_signal.operation_log import (
     log_pipeline_run, log_signal_output,
@@ -348,6 +349,24 @@ def main():
             print(f"  → 清理 structural_drift 表: 刪除 {deleted} 筆超過 90 天的記錄")
     except Exception as e:
         print(f"  ⚠ structural_drift 清理失敗: {e}")
+
+    # T010: 個股池訊號 — 全景快照 + 存活者偏誤處理 + 觀察清單歷史記錄
+    try:
+        record_watchlist_snapshot(db, WATCH_STOCKS, run_date)
+        snap = build_stock_pool_snapshot(db, trade_date=run_date)
+        removed_n = mark_removed(db, WATCH_STOCKS, run_date)
+        consistent = snap.cross_compare.get("consistent_count", 0)
+        inconsistent = snap.cross_compare.get("inconsistent_count", 0)
+        print(f"  → 個股池: {snap.pool_size} 檔, 族群 {len(snap.by_sector)} 個, "
+              f"與大盤一致 {consistent}/不一致 {inconsistent}")
+        if removed_n:
+            print(f"  → 觀察清單變動: {removed_n} 檔被標記為已移除 (存活者偏誤記錄)")
+        status["stock_pool"] = "ok"
+    except Exception as e:
+        print(f"  ✗ 個股池快照失敗: {e}")
+        import traceback
+        traceback.print_exc()
+        status["stock_pool"] = "fail"
 
     print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 管線完成")
     return 0 if all_ok else 1

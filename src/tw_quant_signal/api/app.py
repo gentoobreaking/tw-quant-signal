@@ -1,5 +1,6 @@
 import json
 import os
+from dataclasses import asdict
 from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
@@ -635,6 +636,74 @@ def performance_logs(days: int = Query(default=30, ge=1, le=365),
         market_state=market_state,
     )
     rows.reverse()  # 由近至遠
+    return {"data": rows}
+
+
+# ---- T010: 個股池訊號 ----
+
+@app.get("/api/stock-pool/overview")
+def stock_pool_overview(trade_date: str = Query(default=None, pattern="^\\d{4}-\\d{2}-\\d{2}$")):
+    """T010: 個股池全景，含族群分組、大盤交叉比對、相對大盤強弱。"""
+    from tw_quant_signal.stock_pool import build_stock_pool_snapshot
+    db = _get_db()
+    snap = build_stock_pool_snapshot(db, trade_date=trade_date)
+    return {"data": {
+        "as_of": snap.as_of,
+        "market_state": snap.market_state,
+        "pool_size": snap.pool_size,
+        "rows": [asdict(r) for r in snap.rows],
+        "by_sector": snap.by_sector,
+        "cross_compare": snap.cross_compare,
+    }}
+
+
+@app.get("/api/stock-pool/relative-strength")
+def stock_pool_relative_strength(trade_date: str = Query(default=None, pattern="^\\d{4}-\\d{2}-\\d{2}$"),
+                                benchmark: str = Query(default="0050", min_length=4, max_length=6)):
+    """T010: 個股相對大盤強弱 (5/20/60 日超額報酬)。"""
+    from tw_quant_signal.relative_strength import compute_relative_strength_for_pool
+    from tw_quant_signal.config import WATCH_STOCKS
+    db = _get_db()
+    rows = compute_relative_strength_for_pool(db, WATCH_STOCKS, benchmark_id=benchmark)
+    for r in rows:
+        if trade_date:
+            r.as_of = trade_date
+    return {"data": {
+        "as_of": trade_date or rows[0].as_of if rows else None,
+        "benchmark_id": benchmark,
+        "rows": [asdict(r) for r in rows],
+    }}
+
+
+@app.get("/api/stock-pool/cross-compare")
+def stock_pool_cross_compare(trade_date: str = Query(default=None, pattern="^\\d{4}-\\d{2}-\\d{2}$")):
+    """T010: 大盤訊號與個股訊號交叉比對。"""
+    from tw_quant_signal.stock_pool import build_stock_pool_snapshot
+    db = _get_db()
+    snap = build_stock_pool_snapshot(db, trade_date=trade_date)
+    return {"data": snap.cross_compare}
+
+
+@app.get("/api/stock-pool/sectors")
+def stock_pool_sectors():
+    """T010: 全部 (stock_id, name, sector) 對應。"""
+    from tw_quant_signal.stock_pool import SECTOR_MAP, STOCK_NAMES
+    rows = [
+        {"stock_id": sid, "name": STOCK_NAMES.get(sid, sid), "sector": sec}
+        for sid, sec in SECTOR_MAP.items()
+    ]
+    return {"data": rows}
+
+
+@app.get("/api/stock-pool/history")
+def stock_pool_history():
+    """T010: 觀察清單歷史（含已移除者，供存活者偏誤分析）。"""
+    db = _get_db()
+    from tw_quant_signal.stock_pool import STOCK_NAMES
+    rows = db.get_watchlist_history(include_removed=True)
+    for r in rows:
+        r["name"] = STOCK_NAMES.get(r["stock_id"], r["stock_id"])
+        r["status"] = "active" if r["removed_date"] is None else "removed"
     return {"data": rows}
 
 
