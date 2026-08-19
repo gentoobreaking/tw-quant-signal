@@ -26,7 +26,7 @@ function rsColor(label: string | null): string {
 }
 
 export default function StockPool() {
-  const [asOf, setAsOf] = useState('')
+  const [asOf, setAsOf] = useState(() => new Date().toISOString().split('T')[0])
   const [sectorFilter, setSectorFilter] = useState<string>('')
 
   const overview = useQuery({

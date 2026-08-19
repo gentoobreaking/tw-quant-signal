@@ -41,6 +41,22 @@ class Settings:
         rel_path = self._data.get("database", {}).get("path", "data/signal.db")
         return str(self._path.parent / rel_path)
 
+    @property
+    def mcp_timeout_sec(self) -> int:
+        """MCP 呼叫逾時（秒），環境變數 MCP_CALL_TIMEOUT 優先，其次 config.json，預設 60 秒。"""
+        env_val = os.getenv("MCP_CALL_TIMEOUT")
+        if env_val is not None:
+            try:
+                return int(env_val)
+            except ValueError:
+                pass
+        return self._data.get("data_provider", {}).get("mcp_timeout_sec", 60)
+
+    @property
+    def mcp_init_timeout_sec(self) -> int:
+        """MCP 初始化握手逾時（秒），預設 10 秒。"""
+        return self._data.get("data_provider", {}).get("mcp_init_timeout_sec", 10)
+
 
 settings = Settings()
 

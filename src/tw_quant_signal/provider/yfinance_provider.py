@@ -78,6 +78,7 @@ class YfinanceProvider(DataProvider):
                     f"https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY"
                     f"?date={lookback}&stockNo={stock_id}&response=json",
                     timeout=10,
+                    follow_redirects=True,
                 )
                 payload = resp.json()
                 if payload.get("stat") == "OK":

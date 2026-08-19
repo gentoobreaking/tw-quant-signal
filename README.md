@@ -240,6 +240,9 @@ python -m tw_quant_signal.backtest
 ```bash
 docker compose up -d                    # API → port 8000
 docker compose --profile scheduler up   # 額外啟動定時排程容器
+
+# 手動觸發一次管線測試
+docker compose run --rm app bash scripts/scheduler_cron.sh
 ```
 
 定時排程預設在每個交易日 15:00 執行管線 (`scripts/scheduler_cron.sh`)。

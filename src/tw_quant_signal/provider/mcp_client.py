@@ -48,11 +48,13 @@ class McpClient:
         self,
         server_path: str | None = None,
         call_timeout: float = CALL_TIMEOUT_S,
+        init_timeout: float = INIT_TIMEOUT_S,
         connect_retries: int = CONNECT_RETRIES,
         retry_backoff: float = RETRY_BACKOFF_S,
     ):
         self.server_path = server_path or os.getenv("MCP_SERVER_PATH") or DEFAULT_SERVER_CMD
         self.call_timeout = call_timeout
+        self.init_timeout = init_timeout
         self.connect_retries = connect_retries
         self.retry_backoff = retry_backoff
 
@@ -91,7 +93,7 @@ class McpClient:
             "protocolVersion": _PROTOCOL_VERSION,
             "capabilities": {},
             "clientInfo": {"name": "tw-quant-signal", "version": "1.0"},
-        }, timeout=INIT_TIMEOUT_S)
+        }, timeout=self.init_timeout)
         info = (result or {}).get("serverInfo") or {}
         self._server_version = info.get("version")
         logger.info("MCP server 握手完成: %s v%s", info.get("name"), self._server_version)

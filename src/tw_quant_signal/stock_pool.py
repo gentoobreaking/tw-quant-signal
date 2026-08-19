@@ -118,7 +118,17 @@ def build_stock_pool_snapshot(
 ) -> StockPoolSnapshot:
     """產生觀察清單的全景快照。"""
     from tw_quant_signal.config import WATCH_STOCKS
-    as_of = trade_date or date.today().isoformat()
+    if trade_date is None:
+        # 今日尚無資料時，預設抓資料庫中最新的健康分資料交易日（而非行事曆今日），
+        # 否則 multi_timeframe/scorecard 會因無對應日期而回傳 neutral。
+        # 優先用 health_scores 最新日期，才能對齊 _fetch_latest_health 的資料。
+        with _connect(db) as conn:
+            latest = conn.execute(
+                "SELECT MAX(trade_date) FROM health_scores"
+            ).fetchone()
+        as_of = latest[0] if latest and latest[0] else date.today().isoformat()
+    else:
+        as_of = trade_date
     pool = pool or WATCH_STOCKS
 
     # 1. 個股訊號來源（允許部分失敗 — 測試/初始環境可未必有完整 scorecard 資料）

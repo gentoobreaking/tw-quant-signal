@@ -4,7 +4,6 @@ from datetime import date, timedelta
 from typing import Optional
 
 import pandas as pd
-import yfinance as yf
 
 from tw_quant_signal.db import SignalDB
 from tw_quant_signal.twse_client import (
@@ -135,6 +134,7 @@ def _get_yf_quarterly_snapshot(stock_id: str) -> Optional[dict]:
       }
     """
     try:
+        import yfinance as yf
         ticker = yf.Ticker(f"{stock_id}.TW")
         qf = ticker.quarterly_financials
     except Exception:

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from tw_quant_signal.db import SignalDB
 from tw_quant_signal.features import compute_all_features, compute_indicators_for_stock
@@ -23,6 +23,44 @@ class IngestionEngine:
         self._latest_indicators: dict = {}
         self._latest_valuations: dict = {}
         self._watch_stocks: list[str] = list(self.provider.watch_stocks)
+
+    def _get_previous_trading_day(self, run_date: str) -> str:
+        """獲取給定日期的前一交易日（跳過週末）。
+        
+        簡單實作：向前推進直到找到非週末的日期。
+        實際生產環境建議查詢行事曆表。
+        """
+        d = date.fromisoformat(run_date)
+        for _ in range(7):  # 最多往前找 7 天
+            d -= timedelta(days=1)
+            if d.weekday() < 5:  # 週一到週五
+                return d.isoformat()
+        # 兜底：回傳前一天
+        return (date.fromisoformat(run_date) - timedelta(days=1)).isoformat()
+
+    def _is_data_available(self, run_date: str, data_type: str) -> bool:
+        """檢查指定日期的特定類型資料是否已可用。
+        
+        簡單實作：檢查資料庫中是否已有該日期的資料。
+        """
+        try:
+            if data_type == "margin_trading":
+                with self.db.connect() as conn:
+                    row = conn.execute(
+                        "SELECT 1 FROM margin_trading WHERE trade_date=? LIMIT 1",
+                        [run_date]
+                    ).fetchone()
+                    return row is not None
+            elif data_type == "institutional":
+                with self.db.connect() as conn:
+                    row = conn.execute(
+                        "SELECT 1 FROM institutional_flows WHERE trade_date=? LIMIT 1",
+                        [run_date]
+                    ).fetchone()
+                    return row is not None
+        except Exception:
+            pass
+        return False
 
     def _log_source(self, run_date: str, task: str, status: str, message: str = None) -> None:
         """log_pipeline 並標註資料來源（T021 S5）。
@@ -88,13 +126,20 @@ class IngestionEngine:
             return "fail"
 
     def _ingest_institutional(self, run_date: str) -> str:
+        # T028: 當日盤後資料尚未出爐時，回退到前一交易日
+        target_date = run_date
+        today = date.today().isoformat()
+        if run_date == today and not self._is_data_available(run_date, "institutional"):
+            target_date = self._get_previous_trading_day(run_date)
+            self._log_source(run_date, "institutional_flows", "skip", f"當日資料未就緒，回退至 {target_date}")
+        
         try:
-            rows = self.provider.fetch_institutional_flows()
+            rows = self.provider.fetch_institutional_flows(target_date)
             if rows:
                 self.db.upsert_institutional_flows(rows)
-                self._log_source(run_date, "institutional_flows", "ok", f"records={len(rows)}")
+                self._log_source(run_date, "institutional_flows", "ok", f"records={len(rows)} date={target_date}")
                 return "ok"
-            self._log_source(run_date, "institutional_flows", "skip", "no data (weekend/holiday?)")
+            self._log_source(run_date, "institutional_flows", "skip", f"no data (weekend/holiday?) date={target_date}")
             return "skip"
         except Exception as e:
             self._log_source(run_date, "institutional_flows", "fail", str(e))
@@ -194,13 +239,20 @@ class IngestionEngine:
             return "fail"
 
     def _ingest_margin_trading(self, run_date: str) -> str:
+        # T028: 當日盤後資料尚未出爐時，回退到前一交易日
+        target_date = run_date
+        today = date.today().isoformat()
+        if run_date == today and not self._is_data_available(run_date, "margin_trading"):
+            target_date = self._get_previous_trading_day(run_date)
+            self._log_source(run_date, "margin_trading", "skip", f"當日資料未就緒，回退至 {target_date}")
+        
         try:
-            rows = self.provider.fetch_margin_trading_detailed(run_date)
+            rows = self.provider.fetch_margin_trading_detailed(target_date)
             watch_set = set(self._watch_stocks)
             filtered = [r for r in rows if r["stock_id"] in watch_set]
             if filtered:
                 self.db.upsert_margin_trading(filtered)
-            self._log_source(run_date, "margin_trading", "ok", f"records={len(filtered)}")
+            self._log_source(run_date, "margin_trading", "ok", f"records={len(filtered)} date={target_date}")
             return "ok"
         except Exception as e:
             self._log_source(run_date, "margin_trading", "fail", str(e))

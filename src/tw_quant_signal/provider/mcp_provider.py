@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import date
 
 from . import mcp_normalize as norm
@@ -26,7 +27,9 @@ from .base import DataProvider
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_CALL_TIMEOUT = float(os.getenv("MCP_CALL_TIMEOUT", "30"))
+from ..config import settings
+
+_DEFAULT_CALL_TIMEOUT = settings.mcp_timeout_sec
 
 
 class McpDataProvider(DataProvider):
@@ -52,9 +55,14 @@ class McpDataProvider(DataProvider):
 
         self._McpConnectionError = McpConnectionError
         self._McpToolError = McpToolError
+        from ..config import settings
+
+        init_timeout = getattr(settings, "mcp_init_timeout_sec", 10)
+        call_timeout = call_timeout or settings.mcp_timeout_sec
         self._client = McpClient(
             server_path=server_path,
             call_timeout=call_timeout,
+            init_timeout=init_timeout,
         )
         if fallback_provider is None:
             from .twse_direct import TwseDirectProvider
@@ -92,16 +100,26 @@ class McpDataProvider(DataProvider):
         回傳值統一為 mcp envelope 結構（含 "data" key），
         呼叫端一律以 data.get("data") 取值。
         """
-        try:
-            out = self._call(tool, arguments)
-            self._last_source = "mcp"
-            self._last_fallback_reason = None
-            return out
-        except (self._McpConnectionError, self._McpToolError) as exc:
-            logger.warning("MCP %s 失敗，降級至 direct: %s", tool, exc)
-            self._last_source = "direct(fallback)"
-            self._last_fallback_reason = f"{tool}: {exc}"
-            return {"data": fb(self._fallback)}
+        # T025: 對 307 重導向相關錯誤進行重試，減少不必要的 fallback
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                out = self._call(tool, arguments)
+                self._last_source = "mcp"
+                self._last_fallback_reason = None
+                return out
+            except (self._McpConnectionError, self._McpToolError) as exc:
+                err_msg = str(exc).lower()
+                is_redirect_error = "307" in err_msg or "redirect" in err_msg
+                if is_redirect_error and attempt < max_retries:
+                    logger.warning("MCP %s 遇到 307 重導向相關錯誤，重試 (%d/%d): %s",
+                                   tool, attempt + 1, max_retries, exc)
+                    time.sleep(1.0 * (attempt + 1))  # 指數退避
+                    continue
+                logger.warning("MCP %s 失敗，降級至 direct: %s", tool, exc)
+                self._last_source = "direct(fallback)"
+                self._last_fallback_reason = f"{tool}: {exc}"
+                return {"data": fb(self._fallback)}
 
     # ------------------------------------------------------------------ #
     # TWSE 盤後（T021 S2）
